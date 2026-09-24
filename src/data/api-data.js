@@ -753,14 +753,14 @@ export const API_SYSTEMS = [
         signature: "game.GetControllerLeftStickAxis()",
         params: [],
         returns: "number horizontalInput, number verticalInput",
-        desc: "Returns the left stick input values of the connected controller."
+        desc: "Returns the left stick input values of the connected controller. Each axis returns a range within -1 and 1, with 0 representing no input."
       },
       {
         name: "GetControllerRightStickAxis",
         signature: "game.GetControllerRightStickAxis()",
         params: [],
         returns: "number horizontalInput, number verticalInput",
-        desc: "Returns the right stick input values of the connected controller."
+        desc: "Returns the right stick input values of the connected controller. Each axis returns a range within -1 and 1, with 0 representing no input."
       },
       {
         name: "GetCursorUIPos",
@@ -1120,7 +1120,7 @@ export const API_SYSTEMS = [
     file: "library/event_data/CursorEventData.d.lua",
     fields: [
       { name: "dragging", type: "boolean", access: "Read", desc: "Whether user is currently dragging cursor." },
-      { name: "touchId", type: "number", access: "Read", desc: "Touch identifier (-1 for mouse)." }
+      { name: "touchId", type: "number", access: "Read", desc: "The touch interaction type. -1 for cursor clicks, 0-4 for touch gestures on mobile devices." }
     ],
     methods: [
       { name: "GetUIPos", signature: "eventData:GetUIPos()", params: [], returns: "number x, number y", desc: "Returns cursor position at event moment from bottom-left corner." },
