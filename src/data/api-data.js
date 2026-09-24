@@ -66,7 +66,8 @@ export const API_CLASSES = [
         signature: "control:FindChild(path)",
         params: [{ name: "path", type: "string", desc: "The path used to retrieve a child, using '/' as delimiter (e.g. 'ChildA/ChildC')." }],
         returns: "ClientControlType?",
-        desc: "Gets a child by path. If multiple children exist with same path, the first by descending sibling index order is returned."
+        desc: "Gets a child by path. If multiple children exist with same path, the first by descending sibling index order is returned.",
+        example: `local child = control:FindChild("Mario/Body")`
       },
       {
         name: "GetControllerNavigation",
@@ -108,7 +109,8 @@ export const API_CLASSES = [
         signature: "control:GetChildren()",
         params: [],
         returns: "ClientControlType[]",
-        desc: "Returns the Client Control's children in descending sibling index order."
+        desc: "Returns the Client Control's children in descending sibling index order.",
+        example: `local children = spriteRoot:GetChildren()\nfor _, pixel in ipairs(children) do\n  DisablePixelUpdates(pixel)\nend`
       },
       {
         name: "GetLocalRotation",
@@ -143,7 +145,8 @@ export const API_CLASSES = [
         signature: "control:GetScriptByPath(path)",
         params: [{ name: "path", type: "string", desc: "The file path of the script, excluding file extension." }],
         returns: "Script?",
-        desc: "Gets the instance of a script attached to the Client Control by file path relative to external_lua_file."
+        desc: "Gets the instance of a script attached to the Client Control by file path relative to external_lua_file.",
+        example: `local pixelScript = pixel:GetScriptByPath("Image_Control")\nif pixelScript then pixelScript:EnableUpdate(false) end`
       },
       {
         name: "GetScripts",
@@ -215,7 +218,8 @@ export const API_CLASSES = [
           { name: "y", type: "number", desc: "The y position relative to the anchor." }
         ],
         returns: "void",
-        desc: "Sets the position of the pivot point relative to the anchor point."
+        desc: "Sets the position of the pivot point relative to the anchor point.",
+        example: `pixel:SetAnchoredPosition(x * pixelSize, (7 - y) * pixelSize)`
       },
       {
         name: "SetAsFirstSibling",
@@ -262,7 +266,8 @@ export const API_CLASSES = [
           { name: "z", type: "number", desc: "Local z scale factor." }
         ],
         returns: "void",
-        desc: "Sets the local scale of the Client Control."
+        desc: "Sets the local scale of the Client Control.",
+        example: `player.control:SetLocalScale(player.facing, 1, 1)`
       },
       {
         name: "SetPivot",
@@ -289,14 +294,16 @@ export const API_CLASSES = [
           { name: "deltaY", type: "number", desc: "Height size offset." }
         ],
         returns: "void",
-        desc: "Sets the size offset between the Client Control and its anchor bounds."
+        desc: "Sets the size offset between the Client Control and its anchor bounds.",
+        example: `pixel:SetSizeDelta(pixelSize, pixelSize)`
       },
       {
         name: "SetVisible",
         signature: "control:SetVisible(visible)",
         params: [{ name: "visible", type: "boolean", desc: "Whether to set as visible." }],
         returns: "void",
-        desc: "Sets the visibility status of the Client Control."
+        desc: "Sets the visibility status of the Client Control.",
+        example: `goomba.control:SetVisible(false)`
       }
     ]
   },
@@ -337,7 +344,8 @@ export const API_CLASSES = [
           { name: "imageId", type: "integer", desc: "The ID of the image asset." }
         ],
         returns: "void",
-        desc: "Sets the image source and ID."
+        desc: "Sets the image source and ID.",
+        example: `image:SetImage(Enum.ImageSource.StaticReference, 100001)`
       },
       {
         name: "SetSoftEdgeWidth",
