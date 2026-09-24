@@ -3,7 +3,7 @@
 // Executes real Miliastra Lua game scripts on an HTML5 Canvas / DOM virtual UI
 // ============================================================================
 
-import * as fengariWebModule from 'fengari-web';
+import * as fengariWebModule from 'https://cdn.jsdelivr.net/npm/fengari-web/+esm';
 
 // Resolve export object across Vite dev, esbuild, and production bundle environments
 const fengariWeb = (fengariWebModule && fengariWebModule.lua)
