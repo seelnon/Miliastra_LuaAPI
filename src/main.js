@@ -349,6 +349,10 @@ class MiliastraCodexApp {
     this.currentTab = tabName;
     this.setNavTab(tabName);
 
+    if (tabName !== 'api') {
+      this.currentRenderedClassId = null;
+    }
+
     if (tabName === 'api') {
       if (this.selectedItem && (this.selectedItem.type === 'class' || this.selectedItem.type === 'global' || this.selectedItem.type === 'method' || this.selectedItem.type === 'field')) {
         this.renderDetail(this.selectedItem);
@@ -399,9 +403,11 @@ class MiliastraCodexApp {
       if (item.type === 'example') {
         this.currentTab = 'examples';
         this.setNavTab('examples');
+        this.currentRenderedClassId = null;
       } else if (item.type === 'enum' || item.type === 'enum_item') {
         this.currentTab = 'enums';
         this.setNavTab('enums');
+        this.currentRenderedClassId = null;
       } else {
         this.currentTab = 'api';
         this.setNavTab('api');
@@ -449,60 +455,67 @@ class MiliastraCodexApp {
   }
 
   renderDetail(item) {
+    let cls = null;
+    let classId = null;
+
     if (item.type === 'class' || (item.type === 'method' && item.rawObj.class) || (item.type === 'field' && item.rawObj.class)) {
-      const cls = item.rawObj.class || item.rawObj;
+      cls = item.rawObj.class || item.rawObj;
+      classId = cls.id || cls.name;
+    } else if (item.type === 'global' || (item.type === 'method' && item.rawObj.system) || (item.type === 'field' && item.rawObj.system)) {
+      cls = item.rawObj.system || item.rawObj;
+      classId = cls.id || cls.name;
+    }
+
+    if (classId && this.currentRenderedClassId === classId) {
+      this.currentSubTarget = item.subTarget;
+      this.highlightSubTarget(item.subTarget);
+      return;
+    }
+
+    if (classId) {
+      this.currentRenderedClassId = classId;
+      this.currentSubTarget = item.subTarget;
       this.mainContent.innerHTML = renderClassDetail(cls, item.subTarget);
       if (item.subTarget) {
         setTimeout(() => {
-          const el = document.getElementById(`method-${item.subTarget}`) || document.getElementById(`field-${item.subTarget}`);
-          if (el) {
-            // Auto expand target method or field if collapsed
-            if (el.classList.contains('method-accordion-item')) {
-              el.classList.add('expanded');
-              const body = el.querySelector('.method-accordion-body');
-              const icon = el.querySelector('.method-toggle-icon');
-              if (body) body.style.display = 'block';
-              if (icon) icon.textContent = '−';
-            } else if (el.classList.contains('field-accordion-item')) {
-              el.classList.add('expanded');
-              const body = el.querySelector('.field-accordion-body');
-              const icon = el.querySelector('.field-toggle-icon');
-              if (body) body.style.display = 'block';
-              if (icon) icon.textContent = '−';
-            }
-            el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-          }
-        }, 50);
-      }
-    } else if (item.type === 'global' || (item.type === 'method' && item.rawObj.system) || (item.type === 'field' && item.rawObj.system)) {
-      const sys = item.rawObj.system || item.rawObj;
-      this.mainContent.innerHTML = renderClassDetail(sys, item.subTarget);
-      if (item.subTarget) {
-        setTimeout(() => {
-          const el = document.getElementById(`method-${item.subTarget}`) || document.getElementById(`field-${item.subTarget}`);
-          if (el) {
-            if (el.classList.contains('method-accordion-item')) {
-              el.classList.add('expanded');
-              const body = el.querySelector('.method-accordion-body');
-              const icon = el.querySelector('.method-toggle-icon');
-              if (body) body.style.display = 'block';
-              if (icon) icon.textContent = '−';
-            } else if (el.classList.contains('field-accordion-item')) {
-              el.classList.add('expanded');
-              const body = el.querySelector('.field-accordion-body');
-              const icon = el.querySelector('.field-toggle-icon');
-              if (body) body.style.display = 'block';
-              if (icon) icon.textContent = '−';
-            }
-            el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-          }
+          this.highlightSubTarget(item.subTarget);
         }, 50);
       }
     } else if (item.type === 'enum' || item.type === 'enum_item') {
+      this.currentRenderedClassId = null;
       const en = item.rawObj.enum || item.rawObj;
       this.mainContent.innerHTML = renderEnumDetail(en, item.subTarget);
     } else if (item.type === 'example') {
+      this.currentRenderedClassId = null;
       this.mainContent.innerHTML = renderExampleDetail(item.rawObj);
+    }
+  }
+
+  highlightSubTarget(subTarget) {
+    const allItems = this.mainContent.querySelectorAll('.method-accordion-item, .field-accordion-item');
+    allItems.forEach(el => {
+      el.classList.remove('highlighted-item');
+    });
+
+    if (subTarget) {
+      const el = document.getElementById(`method-${subTarget}`) || document.getElementById(`field-${subTarget}`);
+      if (el) {
+        if (el.classList.contains('method-accordion-item')) {
+          el.classList.add('expanded');
+          const body = el.querySelector('.method-accordion-body');
+          const icon = el.querySelector('.method-toggle-icon');
+          if (body) body.style.display = 'block';
+          if (icon) icon.textContent = '−';
+        } else if (el.classList.contains('field-accordion-item')) {
+          el.classList.add('expanded');
+          const body = el.querySelector('.field-accordion-body');
+          const icon = el.querySelector('.field-toggle-icon');
+          if (body) body.style.display = 'block';
+          if (icon) icon.textContent = '−';
+        }
+        el.classList.add('highlighted-item');
+        el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }
     }
   }
 
