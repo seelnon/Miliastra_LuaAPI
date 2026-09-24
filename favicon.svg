@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="100%" height="100%">
+  <defs>
+    <!-- Soft blur filter for the glowing aura effect -->
+    <filter id="glow" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="10" />
+    </filter>
+    
+    <!-- Balanced orange-to-amber gradient without blinding white -->
+    <linearGradient id="ringColors" x1="100%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%"   stop-color="#ffb74d" stop-opacity="0.9" />  <!-- Top: Soft warm amber -->
+      <stop offset="30%"  stop-color="#ffa726" stop-opacity="1" />    <!-- Upper Right: Warm orange highlight -->
+      <stop offset="55%"  stop-color="#f57c00" stop-opacity="1" />    <!-- Middle / Right: Rich orange -->
+      <stop offset="85%"  stop-color="#e64a19" stop-opacity="0.95" /> <!-- Lower Left: Slight reddish shift -->
+      <stop offset="100%" stop-color="#ff9800" stop-opacity="0.8" />
+    </linearGradient>
+  </defs>
+
+  <!-- Glowing ring base layer -->
+  <circle cx="128" cy="128" r="75" fill="none" stroke="url(#ringColors)" stroke-width="26" filter="url(#glow)" />
+  
+  <!-- Sharp primary ring layer -->
+  <circle cx="128" cy="128" r="75" fill="none" stroke="url(#ringColors)" stroke-width="24" opacity="0.95" />
+</svg>
