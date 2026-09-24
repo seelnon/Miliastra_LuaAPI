@@ -1,0 +1,34 @@
+---@meta
+
+---A type that encapsulates all tweenable fields. See the corresponding field on the original type for documentation.
+---
+---*This type is not native to the Miliastra Wonderland Lua Scripting API; it has been added to aid development.*
+---@class TweenTarget
+---@field anchoredPositionX number? # Tweenable on all Client Controls.
+---@field anchoredPositionY number? # Tweenable on all Client Controls.
+---@field sizeDeltaX number? # Tweenable on all Client Controls.
+---@field sizeDeltaY number? # Tweenable on all Client Controls.
+---@field anchorMinX NormalizedPercentage? # Tweenable on all Client Controls.
+---@field anchorMinY NormalizedPercentage? # Tweenable on all Client Controls.
+---@field anchorMaxX NormalizedPercentage? # Tweenable on all Client Controls.
+---@field anchorMaxY NormalizedPercentage? # Tweenable on all Client Controls.
+---@field pivotX DecimalPercentage? # Tweenable on all Client Controls.
+---@field pivotY DecimalPercentage? # Tweenable on all Client Controls.
+---@field localScaleX number? # Tweenable on all Client Controls.
+---@field localScaleY number? # Tweenable on all Client Controls.
+---@field localScaleZ number? # Tweenable on all Client Controls.
+---@field localRotationX number? # Tweenable on all Client Controls.
+---@field localRotationY number? # Tweenable on all Client Controls.
+---@field localRotationZ number? # Tweenable on all Client Controls.
+---@field imageColor ColorValue? # Only tweenable on Image Controls. Will not apply in relative Tweens.
+---@field softEdgeWidthX number? # Only tweenable on Image Controls.
+---@field softEdgeWidthY number? # Only tweenable on Image Controls.
+---@field horizontalSoftRange number? # Only tweenable on Image Controls.
+---@field verticalSoftRange number? # Only tweenable on Image Controls.
+---@field fillAmount NormalizedPercentage?  # Only tweenable on Image Controls.
+---@field fontSize integer? # Only tweenable on Text Box Controls and Text Window Controls.
+---@field fontColor ColorValue? # Only tweenable on Text Box Controls and Text Window Controls. Will not apply in relative Tweens.
+---@field bgColor ColorValue? # Only tweenable on Text Box Controls and Text Window Controls. Will not apply in relative Tweens.
+---@field outlineColor ColorValue? # Only tweenable on Text Box Controls and Text Window Controls. Will not apply in relative Tweens.
+---@field minimumFontSize integer? # Only tweenable on Text Box Controls and Text Window Controls.
+---@field scrollProgress NormalizedPercentage? # Only tweenable on Grid Scroller Controls.

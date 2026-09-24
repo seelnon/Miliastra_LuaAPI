@@ -1,0 +1,75 @@
+---@meta
+
+---Encapsulates the runtime type name of types accessible through the Miliastra Wonderland Lua Scripting API.
+---
+---*Aliases are not a feature of the Miliastra Wonderland Lua Scripting API; they are defined to aid development.*
+---@alias ApiType
+---|"nil"
+---|"boolean"
+---|"number"
+---|"string"
+---|"function"
+---|"table"
+---|"Script"
+---|"Tween"
+---|"TweenSequence"
+---|"ServerSignal"
+---|"Enums"
+---|"Enum"
+---|"EnumItem"
+---|"ClientUIContainerControl"
+---|"ClientUITextBoxControl"
+---|"ClientUITextWindowControl"
+---|"ClientUIImageControl"
+---|"ClientUIAnimationControl"
+---|"ClientUIFullscreenAnimationControl"
+---|"ClientUIPresetButtonControl"
+---|"ClientUIKeyHintControl"
+---|"ClientUICursorEventAreaControl"
+---|"ClientUIGridScrollerControl"
+---|"ClientUIReferenceControl"
+
+---Encapsulates all Client Control types that are returned by functions and fields that reference Client Controls.
+---
+---*Aliases are not a feature of the Miliastra Wonderland Lua Scripting API; they are defined to aid development.*
+---@alias ClientControlType
+---|ClientUIAnimationControl
+---|ClientUIContainerControl
+---|ClientUICursorEventAreaControl
+---|ClientUIFullscreenAnimationControl
+---|ClientUIGridScrollerControl
+---|ClientUIImageControl
+---|ClientUIKeyHintControl
+---|ClientUIPresetButtonControl
+---|ClientUIReferenceControl
+---|ClientUITextBoxControl
+---|ClientUITextWindowControl
+
+---Encapsulates the data types that are returned by the server.
+---
+---*Aliases are not a feature of the Miliastra Wonderland Lua Scripting API; they are defined to aid development.*
+---@alias ServerDataType
+---|boolean
+---|number
+---|string
+---|table
+---|Vector3
+---|boolean[]
+---|number[]
+---|string[]
+---|table[]
+---|Vector3[]
+
+---Expects a number that represents a percentage in decimal form (unbound).
+---
+---For example, -0.67 represents -67%, and 1.5 represents 150%.
+---
+---*Aliases are not a feature of the Miliastra Wonderland Lua Scripting API; they are defined to aid development.*
+---@alias DecimalPercentage number
+
+---Expects a number between 0.0 and 1.0 (inclusive) that represents a percentage in decimal form.
+---
+---For example, 0.25 represents 25%, and 1 represents 100%.
+---
+---*Aliases are not a feature of the Miliastra Wonderland Lua Scripting API; they are defined to aid development.*
+---@alias NormalizedPercentage number
