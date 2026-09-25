@@ -239,6 +239,11 @@ export class VirtualUIControl {
     this._explicitImageColor = true;
     if (typeof r === 'object' || typeof r === 'function') {
       this.imageColor = normalizeColor(r, 255);
+    } else if (this.imageColor && typeof this.imageColor === 'object') {
+      this.imageColor.r = Number(r) || 0;
+      this.imageColor.g = Number(g) || 0;
+      this.imageColor.b = Number(b) || 0;
+      this.imageColor.a = a !== undefined ? Number(a) : 255;
     } else {
       this.imageColor = {
         r: Number(r) || 0,
@@ -252,6 +257,11 @@ export class VirtualUIControl {
   SetBgColor(r, g, b, a = 0) {
     if (typeof r === 'object' || typeof r === 'function') {
       this.bgColor = normalizeColor(r, 0);
+    } else if (this.bgColor && typeof this.bgColor === 'object') {
+      this.bgColor.r = Number(r) || 0;
+      this.bgColor.g = Number(g) || 0;
+      this.bgColor.b = Number(b) || 0;
+      this.bgColor.a = a !== undefined ? Number(a) : 0;
     } else {
       this.bgColor = {
         r: Number(r) || 0,
@@ -265,6 +275,11 @@ export class VirtualUIControl {
   SetFontColor(r, g, b, a = 255) {
     if (typeof r === 'object' || typeof r === 'function') {
       this.fontColor = normalizeColor(r, 255);
+    } else if (this.fontColor && typeof this.fontColor === 'object') {
+      this.fontColor.r = Number(r) || 0;
+      this.fontColor.g = Number(g) || 0;
+      this.fontColor.b = Number(b) || 0;
+      this.fontColor.a = a !== undefined ? Number(a) : 255;
     } else {
       this.fontColor = {
         r: Number(r) || 0,
@@ -306,6 +321,42 @@ export class VirtualUIControl {
         this.parent.children.unshift(this);
       }
     }
+    return true;
+  }
+
+  SetSiblingIndex(index) {
+    if (this.parent && this.parent.children) {
+      const idx = this.parent.children.indexOf(this);
+      if (idx !== -1) {
+        this.parent.children.splice(idx, 1);
+        const clamped = Math.max(0, Math.min(this.parent.children.length, Math.floor(Number(index) || 0)));
+        this.parent.children.splice(clamped, 0, this);
+      }
+    }
+    return true;
+  }
+
+  GetSiblingIndex() {
+    if (!this.parent || !this.parent.children) return -1;
+    return this.parent.children.indexOf(this);
+  }
+
+  RemoveAllCursorEventListeners() {
+    this.cursorListeners = {};
+  }
+
+  RemoveCursorEventListeners(eventType) {
+    const key = Number(eventType) || eventType;
+    delete this.cursorListeners[key];
+  }
+
+  RemoveAllKeyEventListeners() {
+    this.keyListeners = {};
+  }
+
+  RemoveKeyEventListeners(eventType) {
+    const key = Number(eventType) || eventType;
+    delete this.keyListeners[key];
   }
 
   AddCursorEventListener(eventType, callbackId) {
@@ -360,7 +411,7 @@ export class VirtualUIControl {
   }
 
   // Calculate screen bounding box in Canvas coordinates (0,0 is bottom-left)
-  getScreenBounds(canvasWidth, canvasHeight) {
+  getScreenBounds(canvasWidth, canvasHeight, precomputedParentBounds = null) {
     let parentWidth = canvasWidth;
     let parentHeight = canvasHeight;
     let parentScaleX = 1;
@@ -371,8 +422,8 @@ export class VirtualUIControl {
     let parentPivotY = 0;
     let hasParent = false;
 
-    if (this.parent && this.parent.getScreenBounds) {
-      const pBounds = this.parent.getScreenBounds(canvasWidth, canvasHeight);
+    if (this.parent && (precomputedParentBounds || this.parent.getScreenBounds)) {
+      const pBounds = precomputedParentBounds || this.parent.getScreenBounds(canvasWidth, canvasHeight);
       parentWidth = this.parent.sizeDeltaX || pBounds.width;
       parentHeight = this.parent.sizeDeltaY || pBounds.height;
       parentScaleX = pBounds.worldScaleX !== undefined ? pBounds.worldScaleX : 1;
@@ -493,6 +544,9 @@ export class MiliastraSimulator {
     const h = Math.max(200, Math.min(2160, Math.round(Number(newHeight) || 640)));
     if (this.width === w && this.height === h) return;
 
+    const oldWidth = this.width;
+    const oldHeight = this.height;
+
     this.width = w;
     this.height = h;
     this.canvas.width = this.width;
@@ -503,9 +557,27 @@ export class MiliastraSimulator {
       this.rootControl.sizeDeltaX = this.width;
       this.rootControl.sizeDeltaY = this.height;
     }
-    if (this.scriptHost) {
+    // Only resize scriptHost if the Lua script has NOT customized its dimensions/pivot (e.g. Tetri-shot sets script.object to 280x560 centered)
+    if (
+      this.scriptHost &&
+      this.scriptHost.sizeDeltaX === oldWidth &&
+      this.scriptHost.sizeDeltaY === oldHeight &&
+      this.scriptHost.pivotX === 0 &&
+      this.scriptHost.pivotY === 0
+    ) {
       this.scriptHost.sizeDeltaX = this.width;
       this.scriptHost.sizeDeltaY = this.height;
+    }
+    // Update any full-viewport overlay controls that were sized to GetUICanvasSize() in OnStart()
+    if (this.controlsById) {
+      for (const ctrl of this.controlsById.values()) {
+        if (ctrl !== this.rootControl && ctrl !== this.scriptHost) {
+          if (ctrl.sizeDeltaX === oldWidth && ctrl.sizeDeltaY === oldHeight) {
+            ctrl.sizeDeltaX = this.width;
+            ctrl.sizeDeltaY = this.height;
+          }
+        }
+      }
     }
     this.log(`Viewport updated to ${this.width} × ${this.height}`, 'info');
     if (this.isRunning) {
@@ -703,16 +775,16 @@ export class MiliastraSimulator {
   }
 
   // Hit test for controls from top to bottom
-  hitTestControls(x, y, control = this.rootControl) {
+  hitTestControls(x, y, control = this.rootControl, parentBounds = null) {
     if (!control.visible || !control.alive) return [];
     const hits = [];
-    const bounds = control.getScreenBounds(this.width, this.height);
+    const bounds = control.getScreenBounds(this.width, this.height, parentBounds);
     const inside = x >= bounds.left && x <= bounds.right && y >= bounds.bottom && y <= bounds.top;
 
     if (control.children) {
       // Check children in reverse order (topmost first)
       for (let i = control.children.length - 1; i >= 0; i--) {
-        const childHits = this.hitTestControls(x, y, control.children[i]);
+        const childHits = this.hitTestControls(x, y, control.children[i], bounds);
         hits.push(...childHits);
       }
     }
@@ -1229,206 +1301,382 @@ export class MiliastraSimulator {
         sim:log("[ERR] " .. str, "error")
       end
 
-      -- 4. Wrap JS Control in Lua Metatable
-      local function wrapControl(jsCtrl)
-        if not jsCtrl then return nil end
-        local obj = { _raw = jsCtrl }
+      -- 4. Wrap JS Control in Lua Metatable (Cached + Pre-allocated Method Table for 60FPS Zero-Allocation Calls)
+      local _ControlWrapCache = {}
+      local wrapControl
 
-        local meta = {
-          __index = function(t, k)
-            if k == "name" then return jsCtrl.name
-            elseif k == "text" then return jsCtrl.text
-            elseif k == "fontSize" then return jsCtrl.fontSize
-            elseif k == "fontColor" then
-              local fc = jsCtrl.fontColor
-              return fc and Color.FromRGBA(fc.r, fc.g, fc.b, fc.a) or Color.FromRGBA(255, 255, 255, 255)
-            elseif k == "bgColor" then
-              local bc = jsCtrl.bgColor
-              return bc and Color.FromRGBA(bc.r, bc.g, bc.b, bc.a) or Color.FromRGBA(0, 0, 0, 0)
-            elseif k == "imageColor" then
-              local ic = jsCtrl.imageColor
-              return ic and Color.FromRGBA(ic.r, ic.g, ic.b, ic.a) or Color.FromRGBA(255, 255, 255, 255)
-            elseif k == "imageType" then return jsCtrl.imageType
-            elseif k == "resourceId" then return jsCtrl.resourceId
-            elseif k == "anchoredPositionX" then return jsCtrl.anchoredPositionX
-            elseif k == "anchoredPositionY" then return jsCtrl.anchoredPositionY
-            elseif k == "sizeDeltaX" then return jsCtrl.sizeDeltaX
-            elseif k == "sizeDeltaY" then return jsCtrl.sizeDeltaY
-            elseif k == "localScaleX" then return jsCtrl.localScaleX or 1
-            elseif k == "localScaleY" then return jsCtrl.localScaleY or 1
-            elseif k == "localScaleZ" then return jsCtrl.localScaleZ or 1
-            elseif k == "localRotationX" then return jsCtrl.localRotationX or 0
-            elseif k == "localRotationY" then return jsCtrl.localRotationY or 0
-            elseif k == "localRotationZ" then return jsCtrl.localRotationZ or 0
-            elseif k == "anchorMinX" then return jsCtrl.anchorMinX or 0
-            elseif k == "anchorMinY" then return jsCtrl.anchorMinY or 0
-            elseif k == "anchorMaxX" then return jsCtrl.anchorMaxX or 0
-            elseif k == "anchorMaxY" then return jsCtrl.anchorMaxY or 0
-            elseif k == "pivotX" then return jsCtrl.pivotX or 0.5
-            elseif k == "pivotY" then return jsCtrl.pivotY or 0.5
-            elseif k == "visible" then return jsCtrl.visible
-            elseif k == "alive" then return jsCtrl.alive
-            elseif k == "interactable" then return jsCtrl.interactable
-            elseif k == "raycastTarget" then return jsCtrl.raycastTarget
-            elseif k == "adaptiveFontSize" then return jsCtrl.adaptiveFontSize
-            elseif k == "horizontalAlignment" then return jsCtrl.horizontalAlignment
-            elseif k == "verticalAlignment" then return jsCtrl.verticalAlignment
-            elseif k == "prefabIndex" then return jsCtrl.id
-            elseif k == "id" then return jsCtrl.id
-            elseif k == "parent" then return wrapControl(jsCtrl.parent)
-            end
-
-            -- Methods
-            return function(self, ...)
-              local args = {...}
-              if k == "SetAnchorMin" then
-                jsCtrl:SetAnchorMin(args[1] or 0, args[2] or 0)
-              elseif k == "SetAnchorMax" then
-                jsCtrl:SetAnchorMax(args[1] or 0, args[2] or 0)
-              elseif k == "SetPivot" then
-                jsCtrl:SetPivot(args[1] or 0, args[2] or 0)
-              elseif k == "SetAnchoredPosition" then
-                jsCtrl:SetAnchoredPosition(args[1] or 0, args[2] or 0)
-              elseif k == "SetSizeDelta" then
-                jsCtrl:SetSizeDelta(args[1] or 0, args[2] or 0)
-              elseif k == "SetLocalScale" then
-                jsCtrl:SetLocalScale(args[1], args[2], args[3])
-              elseif k == "SetLocalRotation" then
-                jsCtrl:SetLocalRotation(args[1], args[2], args[3])
-              elseif k == "SetActive" then
-                jsCtrl:SetActive(args[1])
-              elseif k == "SetImage" then
-                jsCtrl:SetImage(args[1], args[2])
-              elseif k == "SetVisible" then
-                jsCtrl:SetVisible(args[1])
-              elseif k == "SetInteractable" then
-                jsCtrl:SetInteractable(args[1])
-              elseif k == "SetSoftEdgeWidth" then
-                jsCtrl:SetSoftEdgeWidth(args[1] or 0, args[2] or 0)
-              elseif k == "SetAsLastSibling" then
-                jsCtrl:SetAsLastSibling()
-              elseif k == "SetAsFirstSibling" then
-                jsCtrl:SetAsFirstSibling()
-              elseif k == "Destroy" then
-                jsCtrl:Destroy()
-              elseif k == "GetParent" then
-                return wrapControl(jsCtrl:GetParent())
-              elseif k == "GetControl" then
-                return self
-              elseif k == "GetAnchorMin" then
-                return jsCtrl.anchorMinX or 0, jsCtrl.anchorMinY or 0
-              elseif k == "GetAnchorMax" then
-                return jsCtrl.anchorMaxX or 0, jsCtrl.anchorMaxY or 0
-              elseif k == "GetPivot" then
-                return jsCtrl.pivotX or 0.5, jsCtrl.pivotY or 0.5
-              elseif k == "GetAnchoredPosition" then
-                return jsCtrl.anchoredPositionX or 0, jsCtrl.anchoredPositionY or 0
-              elseif k == "GetSizeDelta" then
-                return jsCtrl.sizeDeltaX or 0, jsCtrl.sizeDeltaY or 0
-              elseif k == "GetLocalScale" then
-                return jsCtrl.localScaleX or 1, jsCtrl.localScaleY or 1, jsCtrl.localScaleZ or 1
-              elseif k == "GetLocalRotation" then
-                return jsCtrl.localRotationX or 0, jsCtrl.localRotationY or 0, jsCtrl.localRotationZ or 0
-              elseif k == "AddCursorEventListener" then
-                local eventType = args[1]
-                local luaCallback = args[2]
-                local id = _M_NextCallbackId
-                _M_NextCallbackId = _M_NextCallbackId + 1
-                _M_CursorCallbacks[id] = luaCallback
-                jsCtrl:AddCursorEventListener(eventType, id)
-              elseif k == "AddKeyEventListener" then
-                local keyType = args[1]
-                local luaCallback = args[2]
-                local id = _M_NextCallbackId
-                _M_NextCallbackId = _M_NextCallbackId + 1
-                _M_KeyCallbacks[id] = luaCallback
-                jsCtrl:AddKeyEventListener(keyType, id)
-              elseif k == "GetChildren" then
-                local jsChildren = jsCtrl:GetChildren()
-                local t = {}
-                for i = 0, jsChildren.length - 1 do
-                  table.insert(t, wrapControl(jsChildren[i]))
-                end
-                return t
-              elseif k == "FindChild" then
-                return wrapControl(jsCtrl:FindChild(args[1]))
-              elseif k == "GetChild" then
-                return wrapControl(jsCtrl:GetChild(args[1]))
-              end
-            end
-          end,
-
-          __newindex = function(t, k, v)
-            if k == "name" then jsCtrl.name = v
-            elseif k == "text" then jsCtrl.text = tostring(v)
-            elseif k == "fontSize" then jsCtrl.fontSize = tonumber(v) or 14
-            elseif k == "fontColor" then
-              if type(v) == "table" then
-                local r = tonumber(v.r) or 255
-                local g = tonumber(v.g) or 255
-                local b = tonumber(v.b) or 255
-                local a = v.a ~= nil and tonumber(v.a) or 255
-                jsCtrl:SetFontColor(r, g, b, a)
-              else
-                jsCtrl.fontColor = v
-              end
-            elseif k == "bgColor" then
-              if type(v) == "table" then
-                local r = tonumber(v.r) or 0
-                local g = tonumber(v.g) or 0
-                local b = tonumber(v.b) or 0
-                local a = v.a ~= nil and tonumber(v.a) or 0
-                jsCtrl:SetBgColor(r, g, b, a)
-              else
-                jsCtrl.bgColor = v
-              end
-            elseif k == "imageColor" then
-              if type(v) == "table" then
-                local r = tonumber(v.r) or 255
-                local g = tonumber(v.g) or 255
-                local b = tonumber(v.b) or 255
-                local a = v.a ~= nil and tonumber(v.a) or 255
-                jsCtrl:SetImageColor(r, g, b, a)
-              else
-                jsCtrl.imageColor = v
-              end
-            elseif k == "imageType" then jsCtrl.imageType = tonumber(v) or 4
-            elseif k == "resourceId" then jsCtrl.resourceId = tonumber(v) or v or 100001
-            elseif k == "anchoredPositionX" then jsCtrl.anchoredPositionX = tonumber(v) or 0
-            elseif k == "anchoredPositionY" then jsCtrl.anchoredPositionY = tonumber(v) or 0
-            elseif k == "sizeDeltaX" then jsCtrl.sizeDeltaX = tonumber(v) or 0
-            elseif k == "sizeDeltaY" then jsCtrl.sizeDeltaY = tonumber(v) or 0
-            elseif k == "localScaleX" then jsCtrl.localScaleX = tonumber(v) ~= nil and tonumber(v) or 1
-            elseif k == "localScaleY" then jsCtrl.localScaleY = tonumber(v) ~= nil and tonumber(v) or 1
-            elseif k == "localScaleZ" then jsCtrl.localScaleZ = tonumber(v) ~= nil and tonumber(v) or 1
-            elseif k == "localRotationX" then jsCtrl.localRotationX = tonumber(v) ~= nil and tonumber(v) or 0
-            elseif k == "localRotationY" then jsCtrl.localRotationY = tonumber(v) ~= nil and tonumber(v) or 0
-            elseif k == "localRotationZ" then jsCtrl.localRotationZ = tonumber(v) ~= nil and tonumber(v) or 0
-            elseif k == "anchorMinX" then jsCtrl.anchorMinX = tonumber(v) or 0
-            elseif k == "anchorMinY" then jsCtrl.anchorMinY = tonumber(v) or 0
-            elseif k == "anchorMaxX" then jsCtrl.anchorMaxX = tonumber(v) or 0
-            elseif k == "anchorMaxY" then jsCtrl.anchorMaxY = tonumber(v) or 0
-            elseif k == "pivotX" then jsCtrl.pivotX = tonumber(v) or 0.5
-            elseif k == "pivotY" then jsCtrl.pivotY = tonumber(v) or 0.5
-            elseif k == "visible" then jsCtrl.visible = not not v
-            elseif k == "alive" then jsCtrl.alive = not not v
-            elseif k == "interactable" then jsCtrl.interactable = not not v
-            elseif k == "raycastTarget" then jsCtrl.raycastTarget = not not v
-            elseif k == "adaptiveFontSize" then jsCtrl.adaptiveFontSize = not not v
-            elseif k == "horizontalAlignment" then jsCtrl.horizontalAlignment = tonumber(v) or 1
-            elseif k == "verticalAlignment" then jsCtrl.verticalAlignment = tonumber(v) or 1
-            elseif k == "disableCursorEventPassthrough" then jsCtrl.disableCursorEventPassthrough = not not v
-            elseif k == "disableKeyEventPassthrough" then jsCtrl.disableKeyEventPassthrough = not not v
-            elseif k == "showCursor" then jsCtrl.showCursor = not not v
-            elseif k == "enableSoftEdge" then jsCtrl.enableSoftEdge = not not v
-            elseif k == "horizontalSoftRange" then jsCtrl.horizontalSoftRange = tonumber(v) or 0
-            elseif k == "verticalSoftRange" then jsCtrl.verticalSoftRange = tonumber(v) or 0
-            elseif k == "softEdgeMode" then jsCtrl.softEdgeMode = tonumber(v) or 1
+      local _ControlMethods = {
+        SetAnchorMin = function(self, x, y)
+          local raw = self._raw
+          raw.anchorMinX = tonumber(x) or 0
+          raw.anchorMinY = tonumber(y) or 0
+        end,
+        SetAnchorMax = function(self, x, y)
+          local raw = self._raw
+          raw.anchorMaxX = tonumber(x) or 0
+          raw.anchorMaxY = tonumber(y) or 0
+        end,
+        SetPivot = function(self, x, y)
+          local raw = self._raw
+          raw.pivotX = tonumber(x) or 0
+          raw.pivotY = tonumber(y) or 0
+        end,
+        SetAnchoredPosition = function(self, x, y)
+          local raw = self._raw
+          raw.anchoredPositionX = tonumber(x) or 0
+          raw.anchoredPositionY = tonumber(y) or 0
+        end,
+        SetSizeDelta = function(self, w, h)
+          local raw = self._raw
+          raw.sizeDeltaX = tonumber(w) or 0
+          raw.sizeDeltaY = tonumber(h) or 0
+        end,
+        SetLocalScale = function(self, x, y, z)
+          self._raw:SetLocalScale(x, y, z)
+        end,
+        SetLocalRotation = function(self, x, y, z)
+          self._raw:SetLocalRotation(x, y, z)
+        end,
+        SetActive = function(self, active)
+          self._raw:SetActive(active)
+        end,
+        SetImage = function(self, src, resId)
+          self._raw:SetImage(src, resId)
+        end,
+        SetVisible = function(self, vis)
+          self._raw.visible = not not vis
+        end,
+        SetInteractable = function(self, inter)
+          self._raw.interactable = not not inter
+        end,
+        SetSoftEdgeWidth = function(self, w, h)
+          local raw = self._raw
+          raw.softEdgeWidthX = tonumber(w) or 0
+          raw.softEdgeWidthY = tonumber(h) or 0
+        end,
+        SetAsLastSibling = function(self)
+          self._raw:SetAsLastSibling()
+          return true
+        end,
+        SetAsFirstSibling = function(self)
+          self._raw:SetAsFirstSibling()
+          return true
+        end,
+        SetSiblingIndex = function(self, index)
+          self._raw:SetSiblingIndex(index)
+          return true
+        end,
+        GetSiblingIndex = function(self)
+          return self._raw:GetSiblingIndex()
+        end,
+        Destroy = function(self)
+          self._raw:Destroy()
+        end,
+        GetParent = function(self)
+          return wrapControl(self._raw:GetParent())
+        end,
+        GetControl = function(self)
+          return self
+        end,
+        GetScript = function(self, scriptPrefabIndex)
+          return nil
+        end,
+        GetScriptByPath = function(self, path)
+          return nil
+        end,
+        GetScripts = function(self)
+          return {}
+        end,
+        GetAnchorMin = function(self)
+          local raw = self._raw
+          return raw.anchorMinX or 0, raw.anchorMinY or 0
+        end,
+        GetAnchorMax = function(self)
+          local raw = self._raw
+          return raw.anchorMaxX or 0, raw.anchorMaxY or 0
+        end,
+        GetPivot = function(self)
+          local raw = self._raw
+          return raw.pivotX or 0.5, raw.pivotY or 0.5
+        end,
+        GetAnchoredPosition = function(self)
+          local raw = self._raw
+          return raw.anchoredPositionX or 0, raw.anchoredPositionY or 0
+        end,
+        GetSizeDelta = function(self)
+          local raw = self._raw
+          return raw.sizeDeltaX or 0, raw.sizeDeltaY or 0
+        end,
+        GetLocalScale = function(self)
+          local raw = self._raw
+          return raw.localScaleX or 1, raw.localScaleY or 1, raw.localScaleZ or 1
+        end,
+        GetLocalRotation = function(self)
+          local raw = self._raw
+          return raw.localRotationX or 0, raw.localRotationY or 0, raw.localRotationZ or 0
+        end,
+        AddCursorEventListener = function(self, eventType, luaCallback)
+          local id = _M_NextCallbackId
+          _M_NextCallbackId = _M_NextCallbackId + 1
+          _M_CursorCallbacks[id] = luaCallback
+          self._raw:AddCursorEventListener(eventType, id)
+        end,
+        RemoveCursorEventListener = function(self, eventType, luaCallback)
+          self._raw:RemoveCursorEventListeners(eventType)
+        end,
+        RemoveCursorEventListeners = function(self, eventType)
+          self._raw:RemoveCursorEventListeners(eventType)
+        end,
+        RemoveAllCursorEventListeners = function(self)
+          self._raw:RemoveAllCursorEventListeners()
+        end,
+        SimulateCursorClick = function(self)
+          local bounds = self._raw:getScreenBounds(sim.width, sim.height)
+          local cx = (bounds.left + bounds.right) * 0.5
+          local cy = (bounds.bottom + bounds.top) * 0.5
+          sim:dispatchCursorEvent(2, cx, cy, { self._raw })
+          sim:dispatchCursorEvent(3, cx, cy, { self._raw })
+          sim:dispatchCursorEvent(1, cx, cy, { self._raw })
+        end,
+        AddKeyEventListener = function(self, keyType, luaCallback)
+          local id = _M_NextCallbackId
+          _M_NextCallbackId = _M_NextCallbackId + 1
+          _M_KeyCallbacks[id] = luaCallback
+          self._raw:AddKeyEventListener(keyType, id)
+        end,
+        RemoveKeyEventListener = function(self, keyType, luaCallback)
+          self._raw:RemoveKeyEventListeners(keyType)
+        end,
+        RemoveKeyEventListeners = function(self, keyType)
+          self._raw:RemoveKeyEventListeners(keyType)
+        end,
+        RemoveAllKeyEventListeners = function(self)
+          self._raw:RemoveAllKeyEventListeners()
+        end,
+        AddNavigationEventListener = function(self, eventType, luaCallback)
+        end,
+        RemoveNavigationEventListener = function(self, eventType, luaCallback)
+        end,
+        RemoveNavigationEventListeners = function(self, eventType)
+        end,
+        RemoveAllNavigationEventListeners = function(self)
+        end,
+        SetControllerNavigation = function(self, navDir, navMode, navTarget)
+        end,
+        GetControllerNavigation = function(self, navDir)
+          return 0, nil
+        end,
+        SetFillUnused = function(self)
+          self._raw.fillType = 0
+        end,
+        SetFillHorizontal = function(self, fillHorizType, fillAmount)
+          self._raw.fillType = 1
+          self._raw.fillHorizontalType = tonumber(fillHorizType) or 0
+          self._raw.fillAmount = tonumber(fillAmount) or 1
+        end,
+        SetFillVertical = function(self, fillVertType, fillAmount)
+          self._raw.fillType = 2
+          self._raw.fillVerticalType = tonumber(fillVertType) or 0
+          self._raw.fillAmount = tonumber(fillAmount) or 1
+        end,
+        SetFillRadial90 = function(self, fillRad90Type, fillAmount)
+          self._raw.fillType = 3
+          self._raw.fillRadial90Type = tonumber(fillRad90Type) or 0
+          self._raw.fillAmount = tonumber(fillAmount) or 1
+        end,
+        SetFillRadial180 = function(self, fillRadType, fillAmount)
+          self._raw.fillType = 4
+          self._raw.fillRadialType = tonumber(fillRadType) or 0
+          self._raw.fillAmount = tonumber(fillAmount) or 1
+        end,
+        SetFillRadial360 = function(self, fillRadType, fillAmount)
+          self._raw.fillType = 5
+          self._raw.fillRadialType = tonumber(fillRadType) or 0
+          self._raw.fillAmount = tonumber(fillAmount) or 1
+        end,
+        RefreshItems = function(self, itemCount, callback)
+          local count = math.max(0, math.floor(tonumber(itemCount) or 0))
+          self._raw.itemCount = count
+          if callback then
+            for idx = 0, count - 1 do
+              local itemCtrl = sim:createControl(self._raw.itemPrefabIndex or 1073741852, self._raw)
+              callback(wrapControl(itemCtrl), idx)
             end
           end
-        }
+        end,
+        GetItemIndex = function(self, control)
+          return 0
+        end,
+        GetItemSize = function(self)
+          return 100, 100
+        end,
+        GetItemSpacing = function(self)
+          return 8, 8
+        end,
+        GetPadding = function(self)
+          return 8, 8, 8, 8
+        end,
+        ScrollToItemAt = function(self, index, scrollAlignType)
+        end,
+        GetContentLength = function(self)
+          return (self._raw.itemCount or 0) * 108
+        end,
+        PlayAnimation = function(self)
+        end,
+        StopAnimation = function(self)
+        end,
+        GetChildren = function(self)
+          local jsChildren = self._raw:GetChildren()
+          local t = {}
+          for i = 0, jsChildren.length - 1 do
+            table.insert(t, wrapControl(jsChildren[i]))
+          end
+          return t
+        end,
+        FindChild = function(self, path)
+          return wrapControl(self._raw:FindChild(path))
+        end,
+        GetChild = function(self, name)
+          return wrapControl(self._raw:GetChild(name))
+        end
+      }
 
-        setmetatable(obj, meta)
+      local _ControlGetters = {
+        name = function(jsCtrl) return jsCtrl.name end,
+        text = function(jsCtrl) return jsCtrl.text end,
+        fontSize = function(jsCtrl) return jsCtrl.fontSize end,
+        fontColor = function(jsCtrl)
+          local fc = jsCtrl.fontColor
+          return fc and Color.FromRGBA(fc.r, fc.g, fc.b, fc.a) or Color.FromRGBA(255, 255, 255, 255)
+        end,
+        bgColor = function(jsCtrl)
+          local bc = jsCtrl.bgColor
+          return bc and Color.FromRGBA(bc.r, bc.g, bc.b, bc.a) or Color.FromRGBA(0, 0, 0, 0)
+        end,
+        imageColor = function(jsCtrl)
+          local ic = jsCtrl.imageColor
+          return ic and Color.FromRGBA(ic.r, ic.g, ic.b, ic.a) or Color.FromRGBA(255, 255, 255, 255)
+        end,
+        imageType = function(jsCtrl) return jsCtrl.imageType end,
+        resourceId = function(jsCtrl) return jsCtrl.resourceId end,
+        imageId = function(jsCtrl) return jsCtrl.resourceId end,
+        imageSource = function(jsCtrl) return jsCtrl.imageSource or 1 end,
+        anchoredPositionX = function(jsCtrl) return jsCtrl.anchoredPositionX end,
+        anchoredPositionY = function(jsCtrl) return jsCtrl.anchoredPositionY end,
+        sizeDeltaX = function(jsCtrl) return jsCtrl.sizeDeltaX end,
+        sizeDeltaY = function(jsCtrl) return jsCtrl.sizeDeltaY end,
+        localScaleX = function(jsCtrl) return jsCtrl.localScaleX or 1 end,
+        localScaleY = function(jsCtrl) return jsCtrl.localScaleY or 1 end,
+        localScaleZ = function(jsCtrl) return jsCtrl.localScaleZ or 1 end,
+        localRotationX = function(jsCtrl) return jsCtrl.localRotationX or 0 end,
+        localRotationY = function(jsCtrl) return jsCtrl.localRotationY or 0 end,
+        localRotationZ = function(jsCtrl) return jsCtrl.localRotationZ or 0 end,
+        anchorMinX = function(jsCtrl) return jsCtrl.anchorMinX or 0 end,
+        anchorMinY = function(jsCtrl) return jsCtrl.anchorMinY or 0 end,
+        anchorMaxX = function(jsCtrl) return jsCtrl.anchorMaxX or 0 end,
+        anchorMaxY = function(jsCtrl) return jsCtrl.anchorMaxY or 0 end,
+        pivotX = function(jsCtrl) return jsCtrl.pivotX or 0.5 end,
+        pivotY = function(jsCtrl) return jsCtrl.pivotY or 0.5 end,
+        visible = function(jsCtrl) return jsCtrl.visible end,
+        alive = function(jsCtrl) return jsCtrl.alive end,
+        active = function(jsCtrl) return jsCtrl.active ~= false end,
+        activeInHierarchy = function(jsCtrl) return jsCtrl.active ~= false end,
+        interactable = function(jsCtrl) return jsCtrl.interactable end,
+        raycastTarget = function(jsCtrl) return jsCtrl.raycastTarget end,
+        adaptiveFontSize = function(jsCtrl) return jsCtrl.adaptiveFontSize end,
+        horizontalAlignment = function(jsCtrl) return jsCtrl.horizontalAlignment end,
+        verticalAlignment = function(jsCtrl) return jsCtrl.verticalAlignment end,
+        prefabIndex = function(jsCtrl) return jsCtrl.templateId or jsCtrl.id end,
+        id = function(jsCtrl) return jsCtrl.id end,
+        parent = function(jsCtrl) return wrapControl(jsCtrl.parent) end
+      }
+
+      local _ControlSetters = {
+        name = function(jsCtrl, v) jsCtrl.name = v end,
+        text = function(jsCtrl, v) jsCtrl.text = tostring(v) end,
+        fontSize = function(jsCtrl, v) jsCtrl.fontSize = tonumber(v) or 14 end,
+        fontColor = function(jsCtrl, v)
+          if type(v) == "table" then
+            jsCtrl:SetFontColor(tonumber(v.r) or 255, tonumber(v.g) or 255, tonumber(v.b) or 255, v.a ~= nil and tonumber(v.a) or 255)
+          else
+            jsCtrl.fontColor = v
+          end
+        end,
+        bgColor = function(jsCtrl, v)
+          if type(v) == "table" then
+            jsCtrl:SetBgColor(tonumber(v.r) or 0, tonumber(v.g) or 0, tonumber(v.b) or 0, v.a ~= nil and tonumber(v.a) or 0)
+          else
+            jsCtrl.bgColor = v
+          end
+        end,
+        imageColor = function(jsCtrl, v)
+          if type(v) == "table" then
+            jsCtrl:SetImageColor(tonumber(v.r) or 255, tonumber(v.g) or 255, tonumber(v.b) or 255, v.a ~= nil and tonumber(v.a) or 255)
+          else
+            jsCtrl.imageColor = v
+          end
+        end,
+        imageType = function(jsCtrl, v) jsCtrl.imageType = tonumber(v) or 4 end,
+        resourceId = function(jsCtrl, v) jsCtrl.resourceId = tonumber(v) or v or 100001 end,
+        anchoredPositionX = function(jsCtrl, v) jsCtrl.anchoredPositionX = tonumber(v) or 0 end,
+        anchoredPositionY = function(jsCtrl, v) jsCtrl.anchoredPositionY = tonumber(v) or 0 end,
+        sizeDeltaX = function(jsCtrl, v) jsCtrl.sizeDeltaX = tonumber(v) or 0 end,
+        sizeDeltaY = function(jsCtrl, v) jsCtrl.sizeDeltaY = tonumber(v) or 0 end,
+        localScaleX = function(jsCtrl, v) jsCtrl.localScaleX = tonumber(v) ~= nil and tonumber(v) or 1 end,
+        localScaleY = function(jsCtrl, v) jsCtrl.localScaleY = tonumber(v) ~= nil and tonumber(v) or 1 end,
+        localScaleZ = function(jsCtrl, v) jsCtrl.localScaleZ = tonumber(v) ~= nil and tonumber(v) or 1 end,
+        localRotationX = function(jsCtrl, v) jsCtrl.localRotationX = tonumber(v) ~= nil and tonumber(v) or 0 end,
+        localRotationY = function(jsCtrl, v) jsCtrl.localRotationY = tonumber(v) ~= nil and tonumber(v) or 0 end,
+        localRotationZ = function(jsCtrl, v) jsCtrl.localRotationZ = tonumber(v) ~= nil and tonumber(v) or 0 end,
+        anchorMinX = function(jsCtrl, v) jsCtrl.anchorMinX = tonumber(v) or 0 end,
+        anchorMinY = function(jsCtrl, v) jsCtrl.anchorMinY = tonumber(v) or 0 end,
+        anchorMaxX = function(jsCtrl, v) jsCtrl.anchorMaxX = tonumber(v) or 0 end,
+        anchorMaxY = function(jsCtrl, v) jsCtrl.anchorMaxY = tonumber(v) or 0 end,
+        pivotX = function(jsCtrl, v) jsCtrl.pivotX = tonumber(v) or 0.5 end,
+        pivotY = function(jsCtrl, v) jsCtrl.pivotY = tonumber(v) or 0.5 end,
+        visible = function(jsCtrl, v) jsCtrl.visible = not not v end,
+        alive = function(jsCtrl, v) jsCtrl.alive = not not v end,
+        active = function(jsCtrl, v) jsCtrl.active = not not v end,
+        interactable = function(jsCtrl, v) jsCtrl.interactable = not not v end,
+        raycastTarget = function(jsCtrl, v) jsCtrl.raycastTarget = not not v end,
+        adaptiveFontSize = function(jsCtrl, v) jsCtrl.adaptiveFontSize = not not v end,
+        horizontalAlignment = function(jsCtrl, v) jsCtrl.horizontalAlignment = tonumber(v) or 1 end,
+        verticalAlignment = function(jsCtrl, v) jsCtrl.verticalAlignment = tonumber(v) or 1 end,
+        disableCursorEventPassthrough = function(jsCtrl, v) jsCtrl.disableCursorEventPassthrough = not not v end,
+        disableKeyEventPassthrough = function(jsCtrl, v) jsCtrl.disableKeyEventPassthrough = not not v end,
+        showCursor = function(jsCtrl, v) jsCtrl.showCursor = not not v end,
+        enableSoftEdge = function(jsCtrl, v) jsCtrl.enableSoftEdge = not not v end,
+        horizontalSoftRange = function(jsCtrl, v) jsCtrl.horizontalSoftRange = tonumber(v) or 0 end,
+        verticalSoftRange = function(jsCtrl, v) jsCtrl.verticalSoftRange = tonumber(v) or 0 end,
+        softEdgeMode = function(jsCtrl, v) jsCtrl.softEdgeMode = tonumber(v) or 1 end
+      }
+
+      local _ControlMeta = {
+        __index = function(t, k)
+          local m = _ControlMethods[k]
+          if m then return m end
+          local g = _ControlGetters[k]
+          if g then return g(t._raw) end
+          return nil
+        end,
+        __newindex = function(t, k, v)
+          local s = _ControlSetters[k]
+          if s then
+            s(t._raw, v)
+          else
+            rawset(t, k, v)
+          end
+        end
+      }
+
+      wrapControl = function(jsCtrl)
+        if not jsCtrl then return nil end
+        local cached = _ControlWrapCache[jsCtrl]
+        if cached then return cached end
+
+        local obj = { _raw = jsCtrl }
+        setmetatable(obj, _ControlMeta)
+        _ControlWrapCache[jsCtrl] = obj
         return obj
       end
 
@@ -2134,37 +2382,11 @@ export class MiliastraSimulator {
     const nextId = Math.floor(1000000000 + Math.random() * 900000000);
     const ctrl = new VirtualUIControl(nextId, parent);
     ctrl.templateId = Number(templateId) || 1073741850;
+    ctrl.prefabIndex = ctrl.templateId;
 
-    if (ctrl.templateId === 1073741850) { // Image_Instance ID
-      ctrl.name = 'ImageControl';
-      ctrl.imageColor = { r: 255, g: 255, b: 255, a: 255 };
-      ctrl.resourceId = 100001; // Default rectangle
-      ctrl.sizeDeltaX = 100;
-      ctrl.sizeDeltaY = 100;
-    } else if (ctrl.templateId === 1073741849) { // TextBox_Instance ID
-      ctrl.name = 'TextBoxControl';
-      ctrl.imageColor = { r: 0, g: 0, b: 0, a: 0 };
-      ctrl.fontColor = { r: 255, g: 255, b: 255, a: 255 };
-      ctrl.fontSize = 16;
-      ctrl.sizeDeltaX = 200;
-      ctrl.sizeDeltaY = 50;
-    } else if (ctrl.templateId === 1073741851) { // PresetButton_Instance ID
-      ctrl.name = 'PresetButtonControl';
-      ctrl.imageColor = { r: 65, g: 52, b: 38, a: 230 };
-      ctrl.sizeDeltaX = 160;
-      ctrl.sizeDeltaY = 48;
-      ctrl.interactable = true;
-      ctrl.raycastTarget = true;
-    } else if (ctrl.templateId === 1073741852) { // ContainerControl ID
-      ctrl.name = 'ContainerControl';
-      ctrl.imageColor = { r: 0, g: 0, b: 0, a: 0 };
-    } else if (ctrl.templateId === 1073741856) { // CursorEventArea ID
-      ctrl.name = 'CursorEventAreaControl';
-      ctrl.imageColor = { r: 0, g: 0, b: 0, a: 0 };
-      ctrl.interactable = true;
-      ctrl.raycastTarget = true;
-    }
-
+    // Note: Miliastra automatically generates template IDs per project, so any template ID
+    // can represent an Image, TextBox, PresetButton, Container, or CursorEventArea.
+    // VirtualUIControl adapts dynamically based on the properties/methods called on it.
     this.controlsById.set(ctrl.id, ctrl);
     return ctrl;
   }
@@ -2214,8 +2436,8 @@ export class MiliastraSimulator {
 
     this.animationFrameId = requestAnimationFrame((now) => {
       const elapsed = now - this.lastTime;
-      // Throttle to 60 FPS (~16.6ms) to prevent excessive GPU utilization on high-refresh-rate displays
-      if (elapsed < 15.5) {
+      // Cap 120Hz/144Hz/240Hz displays at ~60 FPS without dropping 60Hz VSync frames (which jitter between 13ms and 18ms)
+      if (elapsed < 11.0) {
         this.loop();
         return;
       }
@@ -2299,16 +2521,16 @@ export class MiliastraSimulator {
     ctx.fillText(`${this.width}×${this.height} | ${this.fps} FPS`, this.width - 12, 18);
   }
 
-  renderControlNode(ctrl) {
+  renderControlNode(ctrl, parentBounds = null) {
     if (!ctrl || !ctrl.visible || !ctrl.alive) return;
 
     const ctx = this.ctx;
-    const bounds = ctrl.getScreenBounds(this.width, this.height);
+    const bounds = ctrl.getScreenBounds(this.width, this.height, parentBounds);
     const canvasY = this.height - bounds.top; // Convert bottom-left to top-left for Canvas2D
 
     // 1. Draw Background / Shape
-    const imgCol = normalizeColor(ctrl.imageColor, 0);
-    const bgCol = normalizeColor(ctrl.bgColor, 0);
+    const imgCol = (ctrl.imageColor && typeof ctrl.imageColor.r === 'number') ? ctrl.imageColor : normalizeColor(ctrl.imageColor, 0);
+    const bgCol = (ctrl.bgColor && typeof ctrl.bgColor.r === 'number') ? ctrl.bgColor : normalizeColor(ctrl.bgColor, 0);
 
     if (bgCol.a > 0) {
       ctx.fillStyle = `rgba(${bgCol.r}, ${bgCol.g}, ${bgCol.b}, ${bgCol.a / 255})`;
@@ -2316,13 +2538,18 @@ export class MiliastraSimulator {
     }
 
     if (imgCol.a > 0) {
-      ctx.save();
       const colorStr = `rgba(${imgCol.r}, ${imgCol.g}, ${imgCol.b}, ${imgCol.a / 255})`;
-      ctx.fillStyle = colorStr;
-
       const shape = ASSET_SHAPES[ctrl.resourceId] || 'rectangle';
 
-      if (shape === 'circle') {
+      // Fast path for standard rectangles (avoids ctx.save/restore overhead across hundreds of grid cells)
+      if (shape === 'rectangle' && (!ctrl.enableSoftEdge || (ctrl.softEdgeWidthX <= 0 && ctrl.softEdgeWidthY <= 0))) {
+        ctx.fillStyle = colorStr;
+        ctx.fillRect(bounds.left, canvasY, Math.max(1, bounds.width), Math.max(1, bounds.height));
+      } else {
+        ctx.save();
+        ctx.fillStyle = colorStr;
+
+        if (shape === 'circle') {
         const rx = Math.max(0.5, bounds.width / 2);
         const ry = Math.max(0.5, bounds.height / 2);
         const cx = bounds.left + bounds.width / 2;
@@ -2424,9 +2651,8 @@ export class MiliastraSimulator {
         }
         ctx.closePath();
         ctx.fill();
-      } else {
-        // Rectangle
-        if (ctrl.enableSoftEdge && (ctrl.softEdgeWidthX > 0 || ctrl.softEdgeWidthY > 0)) {
+        } else {
+          // Rounded Rectangle with softEdgeWidth
           const cornerR = Math.min(bounds.width / 2, bounds.height / 2, Math.max(ctrl.softEdgeWidthX, 4));
           ctx.beginPath();
           if (ctx.roundRect) {
@@ -2435,11 +2661,9 @@ export class MiliastraSimulator {
             ctx.rect(bounds.left, canvasY, Math.max(1, bounds.width), Math.max(1, bounds.height));
           }
           ctx.fill();
-        } else {
-          ctx.fillRect(bounds.left, canvasY, Math.max(1, bounds.width), Math.max(1, bounds.height));
         }
+        ctx.restore();
       }
-      ctx.restore();
     }
 
     // 2. Draw Text if present
@@ -2468,10 +2692,10 @@ export class MiliastraSimulator {
       ctx.restore();
     }
 
-    // Render children in order
+    // Render children in order, passing precomputed parent bounds to avoid O(N * depth) recalculation
     if (ctrl.children && ctrl.children.length > 0) {
       for (const child of ctrl.children) {
-        this.renderControlNode(child);
+        this.renderControlNode(child, bounds);
       }
     }
   }
@@ -2495,23 +2719,7 @@ export class MiliastraSimulator {
   }
 
   setSize(newWidth, newHeight) {
-    const w = Math.max(200, Math.min(3840, Math.round(Number(newWidth) || 960)));
-    const h = Math.max(200, Math.min(2160, Math.round(Number(newHeight) || 640)));
-    this.width = w;
-    this.height = h;
-    this.canvas.width = w;
-    this.canvas.height = h;
-    this.canvas.style.aspectRatio = `${w} / ${h}`;
-
-    if (this.rootControl) {
-      this.rootControl.sizeDeltaX = w;
-      this.rootControl.sizeDeltaY = h;
-    }
-    if (this.scriptHost) {
-      this.scriptHost.sizeDeltaX = w;
-      this.scriptHost.sizeDeltaY = h;
-    }
-    this.log(`Viewport resolution updated to: ${w} × ${h}`, 'info');
+    this.setResolution(newWidth, newHeight);
   }
 
   pause() {
