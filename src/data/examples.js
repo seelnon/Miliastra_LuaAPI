@@ -33,7 +33,6 @@ export async function grabLuaFile(fileName) {
     new URL(`../../lua_examples/${encodedName}`, import.meta.url).href,
     new URL(`./lua_examples/${cleanName}`, window.location.href).href,
     new URL(`./lua_examples/${encodedName}`, window.location.href).href,
-    new URL(`../../public/lua_examples/${cleanName}`, import.meta.url).href,
     `./lua_examples/${cleanName}`,
     `lua_examples/${cleanName}`
   ]));

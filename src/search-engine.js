@@ -5,7 +5,7 @@
 
 import { API_CLASSES, API_SYSTEMS } from './data/api-data.js';
 import { ENUM_DEFINITIONS } from './data/enum-data.js';
-import { LUA_EXAMPLES } from './data/examples-data.js';
+import { LUA_EXAMPLES } from './data/examples.js';
 
 export class SearchEngine {
   constructor() {
