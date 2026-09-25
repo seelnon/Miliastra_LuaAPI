@@ -23,13 +23,16 @@ local RECTANGLE_RESOURCE = 100001
 local CIRCLE_RESOURCE = 100002
 
 local PHYSICS_STEP = 1 / 120
-local MAX_STEPS_PER_FRAME = 8
-local BALL_COUNT = 16
+local MAX_STEPS_PER_FRAME = 6
+local SOLVER_ITERATIONS = 3
 local BALL_RESTITUTION = 0.92
 local BALL_FRICTION = 0.985
+local SLEEP_SPEED_SQ = 0.35
+local MAX_BALL_SPEED = 1350
 local WALL_RESTITUTION = 0.82
 local CUE_ACCELERATION = 760
 local EXPLOSION_RADIUS = 240
+local EXPLOSION_RADIUS_SQ = EXPLOSION_RADIUS * EXPLOSION_RADIUS
 local EXPLOSION_IMPULSE = 720
 
 local rootControl = nil
@@ -48,8 +51,13 @@ local tableTop = 0
 local railWidth = 0
 local ballRadius = 0
 local pocketRadius = 0
+local pocketCaptureRadiusSq = 0
 local pocketOpeningHalfWidth = 0
 local railInset = 0
+local innerRailLeft = 0
+local innerRailRight = 0
+local innerRailBottom = 0
+local innerRailTop = 0
 local shotCount = 0
 local pocketedCount = 0
 local pockets = {}
@@ -63,14 +71,6 @@ local function RememberControl(control)
 	spawnedControls[#spawnedControls + 1] = control
 	control:SetAsLastSibling()
 	return control
-end
-
-local function ResolveTemplateIndex(referenceId)
-	local reference = game.GetClientUIControl(referenceId)
-	if reference and reference.prefabIndex then
-		return reference.prefabIndex
-	end
-	return nil
 end
 
 local function ConfigureControl(control, x, y, width, height, name)
@@ -145,7 +145,17 @@ local function SetupGeometry()
 	ballRadius = tableWidth * 0.018
 	pocketRadius = railWidth * 0.72
 	pocketOpeningHalfWidth = pocketRadius * 1.45
-	railInset = railWidth * 1
+	railInset = railWidth
+
+	-- Precalculate strict inner playable rail bounds and squared pocket capture radius
+	innerRailLeft = tableLeft + railInset + ballRadius
+	innerRailRight = tableRight - railInset - ballRadius
+	innerRailBottom = tableBottom + railInset + ballRadius
+	innerRailTop = tableTop - railInset - ballRadius
+
+	local captureRadius = pocketRadius + ballRadius * 0.68
+	pocketCaptureRadiusSq = captureRadius * captureRadius
+
 	pockets = {
 		{ x = tableLeft + railWidth, y = tableBottom + railWidth },
 		{ x = tableLeft + tableWidth * 0.5, y = tableBottom + railWidth * 0.72 },
@@ -226,21 +236,29 @@ local function AddBall(name, x, y, color, isCueBall)
 	local visual = CreateImageInParent(entity, name .. "_Visual", CIRCLE_RESOURCE,
 		color, ballRadius, ballRadius, ballRadius * 2, ballRadius * 2, true)
 	if shadow then shadow:SetAsFirstSibling() end
+
+	local r, g, b = Color.ToRGBA(color)
 	local ball = {
 		control = entity,
 		visual = visual,
 		shadow = shadow,
 		x = x,
 		y = y,
+		renderedX = x,
+		renderedY = y,
 		velocityX = 0,
 		velocityY = 0,
 		mass = 1,
 		radius = ballRadius,
 		color = color,
+		r = r,
+		g = g,
+		b = b,
 		isCueBall = isCueBall == true,
 		active = true,
 		pocketing = false,
 		fadeAlpha = 255,
+		lastAlpha = 255,
 		pocketTargetX = 0,
 		pocketTargetY = 0
 	}
@@ -251,7 +269,7 @@ end
 local function SetupBalls()
 	local rackX = tableLeft + tableWidth * 0.68
 	local rackY = tableBottom + tableHeight * 0.5
-	local rowSpacing = ballRadius * 1.82
+	local rowSpacing = ballRadius * 1.88
 	local colors = {
 		Color.FromRGB(245, 245, 235), Color.FromRGB(220, 35, 35),
 		Color.FromRGB(30, 80, 220), Color.FromRGB(235, 190, 20),
@@ -275,55 +293,90 @@ local function SetupBalls()
 	return cueBall
 end
 
-local function Dot(x1, y1, x2, y2)
-	return x1 * x2 + y1 * y2
+local function UpdateStatus()
+	if statusLabel then
+		statusLabel.text = "WASD: move the cue ball   Click: impulse   Potted: "
+			.. tostring(pocketedCount) .. "   Shots: " .. tostring(shotCount)
+	end
 end
 
-local function IsOpenAtEdge(ball, edge)
-	local openingAllowance = pocketOpeningHalfWidth + ball.radius * 0.7
-	for index, pocketPosition in ipairs(pockets) do
-		local isBottomPocket = index <= 3
-		local isTopPocket = index >= 4
-		if edge == "bottom" and isBottomPocket
-			and math.abs(ball.x - pocketPosition.x) <= openingAllowance then
-			return true
-		elseif edge == "top" and isTopPocket
-			and math.abs(ball.x - pocketPosition.x) <= openingAllowance then
-			return true
-		elseif edge == "left" and (index == 1 or index == 4)
-			and math.abs(ball.y - pocketPosition.y) <= openingAllowance then
-			return true
-		elseif edge == "right" and (index == 3 or index == 6)
-			and math.abs(ball.y - pocketPosition.y) <= openingAllowance then
+local function SetBallOpacity(ball, alpha)
+	local intAlpha = math.max(0, math.min(255, math.floor(alpha)))
+	if ball.lastAlpha == intAlpha then
+		return
+	end
+	ball.lastAlpha = intAlpha
+	if ball.visual and ball.visual.alive then
+		ball.visual.imageColor = Color.FromRGBA(ball.r, ball.g, ball.b, intAlpha)
+	end
+	if ball.shadow and ball.shadow.alive then
+		ball.shadow.imageColor = Color.FromRGBA(0, 0, 0, math.floor(90 * intAlpha / 255))
+	end
+end
+
+local function TryPocketBall(ball)
+	if not ball.active or ball.pocketing then
+		return true
+	end
+	for i = 1, #pockets do
+		local pocketPosition = pockets[i]
+		local deltaX = ball.x - pocketPosition.x
+		local deltaY = ball.y - pocketPosition.y
+		local distSq = deltaX * deltaX + deltaY * deltaY
+		if distSq <= pocketCaptureRadiusSq then
+			ball.velocityX = 0
+			ball.velocityY = 0
+			ball.active = false
+			ball.pocketing = true
+			ball.fadeAlpha = 255
+			ball.pocketTargetX = pocketPosition.x
+			ball.pocketTargetY = pocketPosition.y
 			return true
 		end
 	end
 	return false
 end
 
+-- Unconditional solid rail containment for all active (non-pocketed) balls.
+-- Eliminates the pocket-edge gap bug where multi-ball collisions could push a ball
+-- through an open rail edge without triggering pocket capture.
 local function ClampBallToRails(ball)
-	local left = tableLeft + railInset + ball.radius
-	local right = tableRight - railInset - ball.radius
-	local bottom = tableBottom + railInset + ball.radius
-	local top = tableTop - railInset - ball.radius
-
-	if ball.x < left and not IsOpenAtEdge(ball, "left") then
-		ball.x = left
-		if ball.velocityX < 0 then ball.velocityX = -ball.velocityX * WALL_RESTITUTION end
-	elseif ball.x > right and not IsOpenAtEdge(ball, "right") then
-		ball.x = right
-		if ball.velocityX > 0 then ball.velocityX = -ball.velocityX * WALL_RESTITUTION end
+	if not ball.active or ball.pocketing then
+		return
 	end
-	if ball.y < bottom and not IsOpenAtEdge(ball, "bottom") then
-		ball.y = bottom
-		if ball.velocityY < 0 then ball.velocityY = -ball.velocityY * WALL_RESTITUTION end
-	elseif ball.y > top and not IsOpenAtEdge(ball, "top") then
-		ball.y = top
-		if ball.velocityY > 0 then ball.velocityY = -ball.velocityY * WALL_RESTITUTION end
+
+	-- Check pocket capture first in case a collision pushed the ball into a pocket mouth
+	if TryPocketBall(ball) then
+		return
+	end
+
+	if ball.x < innerRailLeft then
+		ball.x = innerRailLeft
+		if ball.velocityX < 0 then
+			ball.velocityX = -ball.velocityX * WALL_RESTITUTION
+		end
+	elseif ball.x > innerRailRight then
+		ball.x = innerRailRight
+		if ball.velocityX > 0 then
+			ball.velocityX = -ball.velocityX * WALL_RESTITUTION
+		end
+	end
+
+	if ball.y < innerRailBottom then
+		ball.y = innerRailBottom
+		if ball.velocityY < 0 then
+			ball.velocityY = -ball.velocityY * WALL_RESTITUTION
+		end
+	elseif ball.y > innerRailTop then
+		ball.y = innerRailTop
+		if ball.velocityY > 0 then
+			ball.velocityY = -ball.velocityY * WALL_RESTITUTION
+		end
 	end
 end
 
-local function ResolveBallPair(first, second)
+-- Resolves elastic velocity impulses (on first pass) and positional overlap separation.
+local function ResolveBallPair(first, second, applyImpulse)
 	if not first.active or not second.active then
 		return
 	end
@@ -346,63 +399,69 @@ local function ResolveBallPair(first, second)
 	end
 
 	local penetration = minimumDistance - distance
-	local separation = penetration * 0.5 + 0.01
+	local separation = penetration * 0.5 + 0.005
 	first.x = first.x - normalX * separation
 	first.y = first.y - normalY * separation
 	second.x = second.x + normalX * separation
 	second.y = second.y + normalY * separation
 
+	if not applyImpulse then
+		return
+	end
+
 	local relativeVelocityX = second.velocityX - first.velocityX
 	local relativeVelocityY = second.velocityY - first.velocityY
-	local normalVelocity = Dot(relativeVelocityX, relativeVelocityY, normalX, normalY)
+	local normalVelocity = relativeVelocityX * normalX + relativeVelocityY * normalY
 	if normalVelocity >= 0 then
 		return
 	end
 
-	local impulse = -(1 + BALL_RESTITUTION) * normalVelocity / 2
+	local impulse = -(1 + BALL_RESTITUTION) * normalVelocity * 0.5
 	first.velocityX = first.velocityX - normalX * impulse
 	first.velocityY = first.velocityY - normalY * impulse
 	second.velocityX = second.velocityX + normalX * impulse
 	second.velocityY = second.velocityY + normalY * impulse
 end
 
-local function UpdateStatus()
-	if statusLabel then
-		statusLabel.text = "WASD: move the cue ball   Click: impulse   Potted: "
-			.. tostring(pocketedCount) .. "   Shots: " .. tostring(shotCount)
-	end
-end
+-- Find a non-overlapping spot when respawning the cue ball
+local function RespawnCueBall(cueBall)
+	local baseX = tableLeft + tableWidth * 0.28
+	local baseY = tableBottom + tableHeight * 0.5
+	local minDistSq = (cueBall.radius * 2.05) ^ 2
 
-local function SetBallOpacity(ball, alpha)
-	if ball.visual and ball.visual.alive then
-		local red, green, blue = Color.ToRGBA(ball.color)
-		ball.visual.imageColor = Color.FromRGBA(red, green, blue, math.floor(alpha))
-	end
-	if ball.shadow and ball.shadow.alive then
-		ball.shadow.imageColor = Color.FromRGBA(0, 0, 0, math.floor(90 * alpha / 255))
-	end
-end
+	local candidateX = baseX
+	local candidateY = baseY
 
-local function TryPocketBall(ball)
-	if not ball.active or ball.pocketing then
-		return true
-	end
-	for _, pocketPosition in ipairs(pockets) do
-		local deltaX = ball.x - pocketPosition.x
-		local deltaY = ball.y - pocketPosition.y
-		local pocketDistance = math.sqrt(deltaX * deltaX + deltaY * deltaY)
-		if pocketDistance <= pocketRadius + ball.radius * 0.7 then
-			ball.velocityX = 0
-			ball.velocityY = 0
-			ball.active = false
-			ball.pocketing = true
-			ball.fadeAlpha = 255
-			ball.pocketTargetX = pocketPosition.x
-			ball.pocketTargetY = pocketPosition.y
-			return true
+	for offsetStep = 0, 8 do
+		local testX = baseX - offsetStep * cueBall.radius * 1.1
+		if testX < innerRailLeft then
+			testX = innerRailLeft + cueBall.radius
+		end
+		local clear = true
+		for i = 2, #balls do
+			local other = balls[i]
+			if other.active then
+				local dx = other.x - testX
+				local dy = other.y - baseY
+				if dx * dx + dy * dy < minDistSq then
+					clear = false
+					break
+				end
+			end
+		end
+		if clear then
+			candidateX = testX
+			candidateY = baseY
+			break
 		end
 	end
-	return false
+
+	cueBall.x = candidateX
+	cueBall.y = candidateY
+	cueBall.velocityX = 0
+	cueBall.velocityY = 0
+	cueBall.active = true
+	SetBallOpacity(cueBall, 255)
 end
 
 local function UpdatePocketing(ball, deltaTime)
@@ -413,14 +472,11 @@ local function UpdatePocketing(ball, deltaTime)
 	ball.x = ball.x + (ball.pocketTargetX - ball.x) * moveAmount
 	ball.y = ball.y + (ball.pocketTargetY - ball.y) * moveAmount
 	ball.fadeAlpha = ball.fadeAlpha - deltaTime * 900
-	SetBallOpacity(ball, math.max(0, ball.fadeAlpha))
+	SetBallOpacity(ball, ball.fadeAlpha)
 	if ball.fadeAlpha <= 0 then
 		ball.pocketing = false
 		if ball.isCueBall then
-			ball.x = tableLeft + tableWidth * 0.28
-			ball.y = tableBottom + tableHeight * 0.5
-			ball.active = true
-			SetBallOpacity(ball, 255)
+			RespawnCueBall(ball)
 		else
 			pocketedCount = pocketedCount + 1
 			if ball.control and ball.control.alive then
@@ -432,50 +488,101 @@ local function UpdatePocketing(ball, deltaTime)
 end
 
 local function ApplyCueInput(cueBall, deltaTime)
+	if not cueBall.active then
+		return false
+	end
 	local inputX = (pressedKeys.right and 1 or 0) - (pressedKeys.left and 1 or 0)
 	local inputY = (pressedKeys.up and 1 or 0) - (pressedKeys.down and 1 or 0)
+	if inputX == 0 and inputY == 0 then
+		return false
+	end
 	local length = math.sqrt(inputX * inputX + inputY * inputY)
-	if length > 0 then
-		cueBall.velocityX = cueBall.velocityX + inputX / length * CUE_ACCELERATION * deltaTime
-		cueBall.velocityY = cueBall.velocityY + inputY / length * CUE_ACCELERATION * deltaTime
+	cueBall.velocityX = cueBall.velocityX + (inputX / length) * CUE_ACCELERATION * deltaTime
+	cueBall.velocityY = cueBall.velocityY + (inputY / length) * CUE_ACCELERATION * deltaTime
+	return true
+end
+
+local function ClampBallSpeed(ball)
+	local speedSq = ball.velocityX * ball.velocityX + ball.velocityY * ball.velocityY
+	if speedSq > MAX_BALL_SPEED * MAX_BALL_SPEED then
+		local scale = MAX_BALL_SPEED / math.sqrt(speedSq)
+		ball.velocityX = ball.velocityX * scale
+		ball.velocityY = ball.velocityY * scale
 	end
 end
 
 local function SimulatePhysics(deltaTime)
 	local cueBall = balls[1]
-	if cueBall then ApplyCueInput(cueBall, deltaTime) end
+	local cueDriven = false
+	if cueBall then
+		cueDriven = ApplyCueInput(cueBall, deltaTime)
+	end
 
-	for _, ball in ipairs(balls) do
-		UpdatePocketing(ball, deltaTime)
-		if ball.active then
+	local ballCount = #balls
+	local anyMoving = false
+
+	for i = 1, ballCount do
+		local ball = balls[i]
+		if ball.pocketing then
+			UpdatePocketing(ball, deltaTime)
+			anyMoving = true
+		elseif ball.active then
 			ball.velocityX = ball.velocityX * BALL_FRICTION
 			ball.velocityY = ball.velocityY * BALL_FRICTION
-			ball.x = ball.x + ball.velocityX * deltaTime
-			ball.y = ball.y + ball.velocityY * deltaTime
-			if not TryPocketBall(ball) then
+			ClampBallSpeed(ball)
+
+			local speedSq = ball.velocityX * ball.velocityX + ball.velocityY * ball.velocityY
+			if speedSq < SLEEP_SPEED_SQ and not (ball.isCueBall and cueDriven) then
+				ball.velocityX = 0
+				ball.velocityY = 0
+			else
+				anyMoving = true
+				ball.x = ball.x + ball.velocityX * deltaTime
+				ball.y = ball.y + ball.velocityY * deltaTime
 				ClampBallToRails(ball)
 			end
 		end
 	end
 
-	for firstIndex = 1, #balls - 1 do
-		for secondIndex = firstIndex + 1, #balls do
-			ResolveBallPair(balls[firstIndex], balls[secondIndex])
-		end
+	if not anyMoving then
+		return
 	end
-	for _, ball in ipairs(balls) do
-		if ball.active then ClampBallToRails(ball) end
+
+	-- Multi-iteration constraint solver:
+	-- Iteration 1 resolves elastic velocity impulses + initial separation + rail clamping.
+	-- Iterations 2..N resolve chain positional overlaps (3+ ball pileups against rails/corners)
+	-- while strictly enforcing rail boundaries at the end of EVERY iteration.
+	for iter = 1, SOLVER_ITERATIONS do
+		local applyImpulse = (iter == 1)
+		for firstIndex = 1, ballCount - 1 do
+			local first = balls[firstIndex]
+			if first.active then
+				for secondIndex = firstIndex + 1, ballCount do
+					local second = balls[secondIndex]
+					if second.active then
+						ResolveBallPair(first, second, applyImpulse)
+					end
+				end
+			end
+		end
+		for i = 1, ballCount do
+			local ball = balls[i]
+			if ball.active then
+				ClampBallToRails(ball)
+			end
+		end
 	end
 end
 
 local function ApplyExplosion(x, y)
 	shotCount = shotCount + 1
-	for _, ball in ipairs(balls) do
+	for i = 1, #balls do
+		local ball = balls[i]
 		if ball.active then
 			local deltaX = ball.x - x
 			local deltaY = ball.y - y
 			local distanceSquared = deltaX * deltaX + deltaY * deltaY
-			if distanceSquared < EXPLOSION_RADIUS * EXPLOSION_RADIUS then
+			if distanceSquared < EXPLOSION_RADIUS_SQ then
 				local distance = math.sqrt(distanceSquared)
 				local normalX, normalY = 1, 0
 				if distance > 0.001 then
@@ -484,16 +591,25 @@ local function ApplyExplosion(x, y)
 				local strength = 1 - distance / EXPLOSION_RADIUS
 				ball.velocityX = ball.velocityX + normalX * EXPLOSION_IMPULSE * strength
 				ball.velocityY = ball.velocityY + normalY * EXPLOSION_IMPULSE * strength
+				ClampBallSpeed(ball)
 			end
 		end
 	end
 	UpdateStatus()
 end
 
+-- Dirty-checked UI position updates (0 UI calls/sec when balls are stationary)
 local function RenderBalls()
-	for _, ball in ipairs(balls) do
+	for i = 1, #balls do
+		local ball = balls[i]
 		if (ball.active or ball.pocketing) and ball.control and ball.control.alive then
-			ball.control:SetAnchoredPosition(ball.x, ball.y)
+			local dx = ball.x - ball.renderedX
+			local dy = ball.y - ball.renderedY
+			if dx * dx + dy * dy > 0.0025 then
+				ball.renderedX = ball.x
+				ball.renderedY = ball.y
+				ball.control:SetAnchoredPosition(ball.x, ball.y)
+			end
 		end
 	end
 end
@@ -520,10 +636,8 @@ end
 local function CreateInputLayer()
 	inputControl = game.InstantiateClientUIControl(BUTTON_TEMPLATE or 4, rootControl)
 	if not RememberControl(inputControl) then return false end
-	ConfigureControl(inputControl, 0, 0, game.GetUICanvasSize(), 1, "PHY_InputLayer")
 	local screenWidth, screenHeight = game.GetUICanvasSize()
-	inputControl:SetAnchoredPosition(screenWidth * 0.5, screenHeight * 0.5)
-	inputControl:SetSizeDelta(screenWidth, screenHeight)
+	ConfigureControl(inputControl, screenWidth * 0.5, screenHeight * 0.5, screenWidth, screenHeight, "PHY_InputLayer")
 	inputControl.interactable = true
 	inputControl.raycastTarget = true
 	inputControl:AddCursorEventListener(Enum.CursorEventType.CursorClick, function(eventData)
