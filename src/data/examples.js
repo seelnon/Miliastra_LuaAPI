@@ -1,35 +1,18 @@
 // ============================================================================
 // MILIASTRA LUA EXAMPLES DATABASE
-// Brutalist static fetcher architecture — zero bloat, high structure, pure native JS.
-// Compatible with static site hosting (GitHub Pages, Netlify, Vercel, S3, Nginx)
-// using new URL(...) and fetch() with bundling and in-memory caching.
+// Pure Native ES Module — Zero Vite / Bundler Dependencies (No import.meta.glob)
+// Compatible out-of-the-box with raw static hosting (GitHub Pages, S3, Nginx,
+// Python http.server, Live Server) as well as Vite dev/build environments.
 // ============================================================================
 
-// Vite raw glob import loads every actual .lua file as static strings during build/dev
-const rawLuaModulesRoot = 2;
-const rawLuaModulesRel = 1;
-
-const bundledLuaFiles = { ...rawLuaModulesRoot, ...rawLuaModulesRel };
-
-// In-memory cache for fetched and parsed .lua files
+// In-memory cache for fetched .lua files
 const luaCache = new Map();
+let examplesLoadPromise = null;
 
 /**
- * Resolves static bundle string fallback if present
- */
-function getBundledLuaSource(filename) {
-  const cleanName = filename.replace(/^(\/|lua_examples\/)/, '');
-  for (const [key, content] of Object.entries(bundledLuaFiles)) {
-    if (key.endsWith(`/${cleanName}`) || key.endsWith(cleanName)) {
-      return typeof content === 'string' ? content.replace(/^\uFEFF/, '') : '';
-    }
-  }
-  return '';
-}
-
-/**
- * Fetches a raw .lua file from the static web server using new URL() and fetch(),
- * matching the canonical brutalist Kangxi static architecture.
+ * Fetches a raw .lua file from the static web server using standard Web APIs
+ * (new URL(..., import.meta.url) and fetch()), working seamlessly across
+ * GitHub Pages repository subpaths (e.g. https://user.github.io/repo/) and root domains.
  *
  * @param {string} fileName e.g. "platformer.lua" or "lua_examples/platformer.lua"
  * @returns {Promise<string|null>} The raw Lua script text
@@ -41,21 +24,26 @@ export async function grabLuaFile(fileName) {
     return luaCache.get(cleanName);
   }
 
-  // Attempt static fetch via relative URL from module location
-  const candidateUrls = [
+  const encodedName = encodeURIComponent(cleanName);
+
+  // Resolve relative to both this ES module (/src/data/examples.js -> ../../lua_examples/)
+  // and the current document URL (./lua_examples/) so GitHub Pages subpaths always resolve properly.
+  const candidateUrls = Array.from(new Set([
     new URL(`../../lua_examples/${cleanName}`, import.meta.url).href,
-    new URL(`./lua_examples/${cleanName}`, window.location.origin).href,
-    new URL(`/lua_examples/${cleanName}`, window.location.origin).href,
+    new URL(`../../lua_examples/${encodedName}`, import.meta.url).href,
+    new URL(`./lua_examples/${cleanName}`, window.location.href).href,
+    new URL(`./lua_examples/${encodedName}`, window.location.href).href,
+    new URL(`../../public/lua_examples/${cleanName}`, import.meta.url).href,
     `./lua_examples/${cleanName}`,
     `lua_examples/${cleanName}`
-  ];
+  ]));
 
   for (const targetUrl of candidateUrls) {
     try {
       const response = await fetch(targetUrl);
       if (response.ok) {
         const text = await response.text();
-        // Guard against single-page-app HTML fallback on 404
+        // Guard against SPA HTML fallback on 404
         if (text && !text.trim().startsWith('<!doctype') && !text.trim().startsWith('<html')) {
           const cleanText = text.replace(/^\uFEFF/, '');
           luaCache.set(cleanName, cleanText);
@@ -67,19 +55,12 @@ export async function grabLuaFile(fileName) {
     }
   }
 
-  // Fallback to bundled source
-  const bundled = getBundledLuaSource(cleanName);
-  if (bundled) {
-    luaCache.set(cleanName, bundled);
-    return bundled;
-  }
-
-  console.warn(`[Lua Examples] Could not fetch or find static source for: ${fileName}`);
+  console.warn(`[Lua Examples] Could not fetch static source for: ${fileName}`);
   return null;
 }
 
 /**
- * All 8 real Lua recipes found in /lua_examples/
+ * Curated playable Lua recipes in /lua_examples/
  */
 export const exampleDefinitions = [
   {
@@ -117,32 +98,41 @@ export const exampleDefinitions = [
 ];
 
 /**
- * Enriches an example metadata definition with its real Lua source code
+ * Enriches an example metadata definition with initial placeholder until static fetch completes
  */
 export function enrichExample(def) {
-  const bundled = getBundledLuaSource(def.filename);
+  const cleanName = def.filename.replace(/^(\/|lua_examples\/)/, '');
+  const cached = luaCache.get(cleanName);
   return {
     ...def,
-    code: bundled || `-- Example: ${def.title}\nfunction OnStart()\n    print("Loaded ${def.filename}")\nend`
+    code: cached || `-- Loading ${def.filename}...\nfunction OnStart()\n    print("Loading ${def.filename}...")\nend`,
+    _loaded: Boolean(cached)
   };
 }
 
 /**
- * Exported synchronous array for immediate instant UI rendering
+ * Exported synchronous array for immediate UI rendering
  */
 export const examples = exampleDefinitions.map(enrichExample);
 export const LUA_EXAMPLES = examples;
 
 /**
- * Asynchronously loads and refreshes all examples using static HTTP fetch(),
- * updating the in-memory cache and examples array.
+ * Asynchronously loads and caches all .lua examples using native fetch().
  */
-export async function getLuaExamples() {
-  await Promise.all(examples.map(async (ex) => {
-    const fetched = await grabLuaFile(ex.filename);
-    if (fetched) {
-      ex.code = fetched;
-    }
-  }));
-  return examples;
+export function getLuaExamples() {
+  if (!examplesLoadPromise) {
+    examplesLoadPromise = Promise.all(
+      examples.map(async (ex) => {
+        const fetched = await grabLuaFile(ex.filename);
+        if (fetched) {
+          ex.code = fetched;
+          ex._loaded = true;
+        }
+      })
+    ).then(() => examples);
+  }
+  return examplesLoadPromise;
 }
+
+// Kick off static prefetch immediately when module is imported
+getLuaExamples();

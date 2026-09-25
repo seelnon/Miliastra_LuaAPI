@@ -35,11 +35,15 @@ class MiliastraCodexApp {
     // Asynchronously fetch fresh .lua files via static fetch()
     getLuaExamples().then(() => {
       this.searchEngine.buildIndex();
-      if (this.currentTab === 'examples') {
-        this.renderList();
-        if (this.selectedItem && this.selectedItem.type === 'example') {
-          this.renderDetail(this.selectedItem);
+      this.performSearch();
+      if (this.selectedItem && this.selectedItem.type === 'example') {
+        const updated = this.searchEngine.index.find(i => i.id === this.selectedItem.id);
+        if (updated) {
+          this.selectedItem = updated;
         }
+        this.renderDetail(this.selectedItem);
+      } else if (this.currentTab === 'examples' && !this.selectedItem) {
+        this.renderAllExamplesView();
       }
     }).catch(err => {
       console.warn('Static lua fetch notice:', err);
