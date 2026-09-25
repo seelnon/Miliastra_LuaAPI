@@ -18,13 +18,13 @@ export const API_CLASSES = [
       { name: "prefabIndex", type: "number", access: "Read", desc: "The template index of the Client Control." },
       { name: "active", type: "boolean", access: "Read", desc: "Whether the Client Control is active. While active, attached scripts will call lifecycle functions." },
       { name: "activeInHierarchy", type: "boolean", access: "Read", desc: "Whether the Client Control is active, factoring in the active states of its parent hierarchy." },
-      { name: "visible", type: "boolean", access: "Read", desc: "Whether the Client Control is visible." },
+      { name: "visible", type: "boolean", access: "Read/Write", desc: "Whether the Client Control is visible.", example: "cell:SetVisible(true)\n-- or direct property:\ncell.visible = true" },
       { name: "name", type: "string", access: "Read/Write", desc: "The name of the Client Control." },
       { name: "parent", type: "ClientControlType?", access: "Read/Write", desc: "The parent of the Client Control. Always nil for root-level ControlContainers." },
-      { name: "anchoredPositionX", type: "number", access: "Read/Write/Tweenable", desc: "The x position of the Client Control's pivot point relative to its anchor point." },
-      { name: "anchoredPositionY", type: "number", access: "Read/Write/Tweenable", desc: "The y position of the Client Control's pivot point relative to its anchor point." },
-      { name: "sizeDeltaX", type: "number", access: "Read/Write/Tweenable", desc: "The size offset between the width of the Client Control and its x-axis anchor bounds." },
-      { name: "sizeDeltaY", type: "number", access: "Read/Write/Tweenable", desc: "The size offset between the height of the Client Control and its y-axis anchor bounds." },
+      { name: "anchoredPositionX", type: "number", access: "Read/Write/Tweenable", desc: "The x position of the Client Control's pivot point relative to its anchor point.", example: "control.anchoredPositionX = (column - 1) * CELL_SIZE" },
+      { name: "anchoredPositionY", type: "number", access: "Read/Write/Tweenable", desc: "The y position of the Client Control's pivot point relative to its anchor point.", example: "control.anchoredPositionY = (BOARD_HEIGHT - row) * CELL_SIZE" },
+      { name: "sizeDeltaX", type: "number", access: "Read/Write/Tweenable", desc: "The size offset between the width of the Client Control and its x-axis anchor bounds.", example: "control.sizeDeltaX = CELL_SIZE - 1" },
+      { name: "sizeDeltaY", type: "number", access: "Read/Write/Tweenable", desc: "The size offset between the height of the Client Control and its y-axis anchor bounds.", example: "control.sizeDeltaY = CELL_SIZE - 1" },
       { name: "anchorMinX", type: "NormalizedPercentage", access: "Read/Write/Tweenable", desc: "The minimum x anchor (0.0-1.0) originating from the bottom-left corner." },
       { name: "anchorMinY", type: "NormalizedPercentage", access: "Read/Write/Tweenable", desc: "The minimum y anchor (0.0-1.0) originating from the bottom-left corner." },
       { name: "anchorMaxX", type: "NormalizedPercentage", access: "Read/Write/Tweenable", desc: "The maximum x anchor (0.0-1.0) originating from the bottom-left corner." },
@@ -316,10 +316,10 @@ export const API_CLASSES = [
     description: "Component for displaying static images, sprites, textures, and progressive fill effects (radial, horizontal, vertical).",
     file: "library/client_controls/ImageControl.d.lua",
     fields: [
-      { name: "imageSource", type: "EnumItem.ImageSource", access: "Read", desc: "The image source type (StaticReference, Currency, Equipment, Item, Skill, etc.)." },
+      { name: "imageSource", type: "EnumItem.ImageSource", access: "Read", desc: "The image source type (StaticReference, Currency, Equipment, Item, Skill, etc.).", example: "image:SetImage(Enum.ImageSource.StaticReference, 100001)" },
       { name: "imageId", type: "integer", access: "Read", desc: "The image asset ID." },
-      { name: "imageColor", type: "ColorValue", access: "Read/Write/Tweenable", desc: "The color of the image." },
-      { name: "imageType", type: "EnumItem.ImageType", access: "Read/Write", desc: "The image type (Basic, Stretch)." },
+      { name: "imageColor", type: "ColorValue", access: "Read/Write/Tweenable", desc: "The color of the image.", example: "background.imageColor = Color.FromRGBA(8, 12, 20, 235)" },
+      { name: "imageType", type: "EnumItem.ImageType", access: "Read/Write", desc: "The image type (Basic, Stretch).", example: "background.imageType = Enum.ImageType.Stretch" },
       { name: "enableMask", type: "boolean", access: "Read/Write", desc: "Whether masking is enabled." },
       { name: "enableSoftEdge", type: "boolean", access: "Read/Write", desc: "Whether soft edge is enabled." },
       { name: "softEdgeMode", type: "EnumItem.ImageMaskSoftEdgeMode", access: "Read/Write", desc: "The soft edge mode (Pixel, Percentage)." },
@@ -425,9 +425,9 @@ export const API_CLASSES = [
     description: "Component for displaying formatted text, adaptive font sizes, outlines, and text alignment.",
     file: "library/client_controls/TextBoxControl.d.lua",
     fields: [
-      { name: "text", type: "string", access: "Read/Write", desc: "The displayed text string." },
+      { name: "text", type: "string", access: "Read/Write", desc: "The displayed text string.", example: "scoreText.text = \"SCORE \" .. tostring(score) .. \"   LINES \" .. tostring(lines)" },
       { name: "fontSize", type: "integer", access: "Read/Write/Tweenable", desc: "The font size." },
-      { name: "fontColor", type: "ColorValue", access: "Read/Write/Tweenable", desc: "The font color." },
+      { name: "fontColor", type: "ColorValue", access: "Read/Write/Tweenable", desc: "The font color.", example: "panicLabel.fontColor = Color.FromRGBA(255, 145, 25, 255)" },
       { name: "bgColor", type: "ColorValue", access: "Read/Write/Tweenable", desc: "The background color." },
       { name: "enableOutline", type: "boolean", access: "Read/Write", desc: "Whether text outline is enabled." },
       { name: "outlineColor", type: "ColorValue", access: "Read/Write/Tweenable", desc: "The text outline color." },
@@ -718,63 +718,72 @@ export const API_SYSTEMS = [
         signature: "game.DestroyClientUIControl(control)",
         params: [{ name: "control", type: "ClientControlType", desc: "The Client Control instance to destroy." }],
         returns: "void",
-        desc: "Destroys the specified Client Control instance immediately."
+        desc: "Destroys the specified Client Control instance immediately.",
+        example: "game.DestroyClientUIControl(particleControl)"
       },
       {
         name: "FindClientUIRoot",
         signature: "game.FindClientUIRoot(name)",
         params: [{ name: "name", type: "string", desc: "Name of the root-level ContainerControl." }],
         returns: "ClientUIContainerControl?",
-        desc: "Gets a root-level ContainerControl by name. Returns nil if not found."
+        desc: "Gets a root-level ContainerControl by name. Returns nil if not found.",
+        example: "local root = game.FindClientUIRoot(\"Physics_Root\")"
       },
       {
         name: "GetClientUIControl",
         signature: "game.GetClientUIControl(id)",
         params: [{ name: "id", type: "number", desc: "The runtime ID of the Client Control." }],
         returns: "ClientControlType?",
-        desc: "Gets a Client Control by runtime ID."
+        desc: "Gets a Client Control by runtime ID.",
+        example: "local container = game.GetClientUIControl(1073741855) or script.object"
       },
       {
         name: "GetClientUIRoots",
         signature: "game.GetClientUIRoots()",
         params: [],
         returns: "ClientUIContainerControl[]",
-        desc: "Returns a sequence containing all active root-level ContainerControls."
+        desc: "Returns a sequence containing all active root-level ContainerControls.",
+        example: "local roots = game.GetClientUIRoots()\nif roots[1] then\n  container = game.InstantiateClientUIControl(1073741855, roots[1])\nend"
       },
       {
         name: "GetControllerFocus",
         signature: "game.GetControllerFocus()",
         params: [],
         returns: "ClientControlType?",
-        desc: "Returns the Client Control currently focused by the controller."
+        desc: "Returns the Client Control currently focused by the controller.",
+        example: "local focusedControl = game.GetControllerFocus()"
       },
       {
         name: "GetControllerLeftStickAxis",
         signature: "game.GetControllerLeftStickAxis()",
         params: [],
         returns: "number horizontalInput, number verticalInput",
-        desc: "Returns the left stick input values of the connected controller. Each axis returns a range within -1 and 1, with 0 representing no input."
+        desc: "Returns the left stick input values of the connected controller (-1 to 1; -1 represents left/downward, 1 represents right/upward, 0 no input).",
+        example: "local horizontalInput, verticalInput = game.GetControllerLeftStickAxis()\nif horizontalInput ~= 0 then\n  player.vx = horizontalInput * MOVE_SPEED\nend"
       },
       {
         name: "GetControllerRightStickAxis",
         signature: "game.GetControllerRightStickAxis()",
         params: [],
         returns: "number horizontalInput, number verticalInput",
-        desc: "Returns the right stick input values of the connected controller. Each axis returns a range within -1 and 1, with 0 representing no input."
+        desc: "Returns the right stick input values of the connected controller (-1 to 1; -1 represents left/downward, 1 represents right/upward, 0 no input).",
+        example: "local aimX, aimY = game.GetControllerRightStickAxis()"
       },
       {
         name: "GetCursorUIPos",
         signature: "game.GetCursorUIPos()",
         params: [],
         returns: "number x, number y",
-        desc: "Returns the cursor position originating from the bottom-left corner of the viewport."
+        desc: "Returns the cursor position originating from the bottom-left corner of the viewport.",
+        example: "local cursorX, cursorY = game.GetCursorUIPos()\nupdateAim(cursorX, cursorY)"
       },
       {
         name: "GetDevice",
         signature: "game.GetDevice()",
         params: [],
         returns: "EnumItem.Device",
-        desc: "Returns current input device type (KeyboardAndMouse, Controller, Mobile, MobileController)."
+        desc: "Returns current input device type (KeyboardAndMouse, Controller, Mobile, MobileController).",
+        example: "local device = game.GetDevice()\nif device == Enum.Device.KeyboardAndMouse then\n  print(\"Keyboard & Mouse active\")\nend"
       },
       {
         name: "GetGlobalCustomVariableValue",
@@ -784,35 +793,40 @@ export const API_SYSTEMS = [
           { name: "varName", type: "string", desc: "Name of custom variable." }
         ],
         returns: "ServerDataType?",
-        desc: "Gets a declared Custom Variable from the specified entity."
+        desc: "Gets a declared Custom Variable from the specified entity.",
+        example: "local score = game.GetGlobalCustomVariableValue(Enum.CustomVariableEntityType.Level, \"Score\")"
       },
       {
         name: "GetLanguageType",
         signature: "game.GetLanguageType()",
         params: [],
         returns: "EnumItem.LanguageType",
-        desc: "Returns the active client language (LanguageEng, LanguageChs, LanguageJpn, etc.)."
+        desc: "Returns the active client language (LanguageEng, LanguageChs, LanguageJpn, etc.).",
+        example: "if game.GetLanguageType() == Enum.LanguageType.LanguageEng then\n  print(\"English Localization\")\nend"
       },
       {
         name: "GetStageMode",
         signature: "game.GetStageMode()",
         params: [],
         returns: "EnumItem.StageMode",
-        desc: "Returns current stage mode (Beyond or Classic)."
+        desc: "Returns current stage mode (Beyond or Classic).",
+        example: "local mode = game.GetStageMode()"
       },
       {
         name: "GetText",
         signature: "game.GetText(textMappingId)",
         params: [{ name: "textMappingId", type: "string", desc: "The ID of the Script Text Variable." }],
         returns: "string",
-        desc: "Returns the localized value of a Script Text Variable by Text Mapping ID."
+        desc: "Returns the localized value of a Script Text Variable by Text Mapping ID.",
+        example: "local title = game.GetText(\"TXT_LEVEL_TITLE\")"
       },
       {
         name: "GetUICanvasSize",
         signature: "game.GetUICanvasSize()",
         params: [],
         returns: "number width, number height",
-        desc: "Returns the width and height of the UI viewport canvas in units."
+        desc: "Returns the width and height of the UI viewport canvas in units.",
+        example: "local viewportWidth, viewportHeight = game.GetUICanvasSize()\ncontainer:SetSizeDelta(viewportWidth, viewportHeight)"
       },
       {
         name: "InstantiateClientUIControl",
@@ -822,70 +836,80 @@ export const API_SYSTEMS = [
           { name: "parent", type: "ClientControlType", desc: "Parent control to mount onto." }
         ],
         returns: "ClientControlType",
-        desc: "Instantiates a new Client Control and appends it to parent's children."
+        desc: "Instantiates a new Client Control and appends it to parent's children.",
+        example: "local cell = game.InstantiateClientUIControl(1073741853, container)\ncell:SetImage(Enum.ImageSource.StaticReference, 100001)\ncell.imageType = Enum.ImageType.Stretch"
       },
       {
         name: "IsAudioAlive",
         signature: "game.IsAudioAlive(audioInstanceId)",
         params: [{ name: "audioInstanceId", type: "number", desc: "ID of audio instance." }],
         returns: "boolean",
-        desc: "Checks if audio instance is currently playing/active in memory."
+        desc: "Checks if audio instance is currently playing/active in memory.",
+        example: "if not game.IsAudioAlive(bgmId) then\n  bgmId = game.PlayAudio2D(1001)\nend"
       },
       {
         name: "IsLevelTimePaused",
         signature: "game.IsLevelTimePaused()",
         params: [],
         returns: "boolean",
-        desc: "Returns whether level time is paused."
+        desc: "Returns whether level time is paused.",
+        example: "if game.IsLevelTimePaused() then\n  ShowPauseMenu()\nend"
       },
       {
         name: "IsTestPlay",
         signature: "game.IsTestPlay()",
         params: [],
         returns: "boolean",
-        desc: "Checks if the stage is currently executing in test play mode."
+        desc: "Checks if the stage is currently executing in test play mode.",
+        example: "if game.IsTestPlay() then\n  print(\"Test play debugging enabled\")\nend"
       },
       {
         name: "PauseLevelTime",
         signature: "game.PauseLevelTime(pause)",
         params: [{ name: "pause", type: "boolean", desc: "Whether to pause level time." }],
         returns: "void",
-        desc: "Suspends or resumes level time (OnLevelUpdate will pause)."
+        desc: "Suspends or resumes level time (OnLevelUpdate will pause).",
+        example: "game.PauseLevelTime(true) -- Pause game physics/loop"
       },
       {
         name: "PlayAudio2D",
         signature: "game.PlayAudio2D(id)",
         params: [{ name: "id", type: "number", desc: "Audio clip asset ID." }],
         returns: "number audioInstanceId",
-        desc: "Creates a new 2D audio instance and plays sound effect/music."
+        desc: "Creates a new 2D audio instance and plays sound effect/music.",
+        example: "local sfxId = game.PlayAudio2D(1001)"
       },
       {
         name: "PrintClientUITree",
         signature: "game.PrintClientUITree()",
         params: [],
         returns: "void",
-        desc: "Dumps and prints the entire active Client Control hierarchy to the log."
+        desc: "Dumps and prints the entire active Client Control hierarchy to the log.",
+        example: "game.PrintClientUITree()"
       },
       {
         name: "ServerSignal",
         signature: "game.ServerSignal(signalName)",
         params: [{ name: "signalName", type: "string", desc: "Signal name identifier." }],
         returns: "ServerSignal",
-        desc: "Creates a new Server Signal instance to send data payloads to Node Graphs."
+        desc: "Creates a new Server Signal instance to send data payloads to Node Graphs.",
+        example: "local signal = game.ServerSignal(\"STAGE_CLEAR\")\nsignal:AddInt(100)\nsignal:SendSignal()"
       },
       {
         name: "SetControllerFocus",
         signature: "game.SetControllerFocus(control)",
         params: [{ name: "control", type: "ClientControlType", desc: "Control to receive focus." }],
         returns: "void",
-        desc: "Sets the controller focus to the specified control."
+        desc: "Sets the controller focus to the specified control.",
+        example: "game.SetControllerFocus(mainMenuButton)"
       },
       {
         name: "StopAudio",
         signature: "game.StopAudio(audioInstanceId)",
         params: [{ name: "audioInstanceId", type: "number", desc: "ID of audio instance." }],
         returns: "void",
-        desc: "Stops the specified audio instance."
+        desc: "Stops the specified audio instance.",
+        example: "game.StopAudio(sfxId)"
       },
       {
         name: "Tween",
@@ -917,10 +941,10 @@ export const API_SYSTEMS = [
     description: "Reference to the current executing script instance, its host UI object, parameters, and signal handlers.",
     file: "library/Script.d.lua",
     fields: [
-      { name: "alive", type: "boolean", access: "Read", desc: "Whether script instance is loaded. Check before calling Invoke." },
+      { name: "alive", type: "boolean", access: "Read", desc: "Whether script instance is loaded. Check before calling Invoke.", example: "if controllerScript and controllerScript.alive then\n  controllerScript:Invoke(\"Bounce\")\nend" },
       { name: "id", type: "number", access: "Read", desc: "The runtime ID of the script instance." },
       { name: "prefabIndex", type: "number?", access: "Read", desc: "The mapping ID (nil for Modules)." },
-      { name: "object", type: "ClientControlType?", access: "Read", desc: "The Client Control instance that the script is mounted on." },
+      { name: "object", type: "ClientControlType?", access: "Read", desc: "The Client Control instance that the script is mounted on.", example: "local hostControl = script.object" },
       { name: "path", type: "string", access: "Read", desc: "The path relative to external_lua_file." },
       { name: "enabled", type: "boolean", access: "Read/Write", desc: "Execution state flag." }
     ],
@@ -930,14 +954,16 @@ export const API_SYSTEMS = [
         signature: "script:EnableUpdate(enabled)",
         params: [{ name: "enabled", type: "boolean", desc: "Whether OnUpdate and OnLevelUpdate should execute." }],
         returns: "void",
-        desc: "Sets whether the script executes OnUpdate and OnLevelUpdate lifecycle ticks every frame."
+        desc: "Sets whether the script executes OnUpdate and OnLevelUpdate lifecycle ticks every frame.",
+        example: "function OnStart()\n  script:EnableUpdate(true)\nend"
       },
       {
         name: "GetParam",
         signature: "script:GetParam(varName)",
         params: [{ name: "varName", type: "string", desc: "Name of Script Variable." }],
         returns: "ServerDataType?",
-        desc: "Gets the value of a Script Variable defined in the script mapping."
+        desc: "Gets the value of a Script Variable defined in the script mapping (generic return T : ServerDataType).",
+        example: "local maxSpeed = script:GetParam(\"MaxSpeed\") or 120"
       },
       {
         name: "Invoke",
@@ -947,7 +973,8 @@ export const API_SYSTEMS = [
           { name: "...", type: "any", desc: "Arguments to pass." }
         ],
         returns: "any ...",
-        desc: "Calls a global function on the target script instance across files."
+        desc: "Calls a global function on the target script instance across files.",
+        example: "script:Invoke(\"ApplyExplosion\", 100, 200)"
       },
       {
         name: "RegisterCustomVariableChangedHandler",
@@ -958,7 +985,8 @@ export const API_SYSTEMS = [
           { name: "callback", type: "fun(entity, varName)", desc: "Callback function." }
         ],
         returns: "void",
-        desc: "Registers handler for custom variable value changes."
+        desc: "Registers handler for custom variable value changes.",
+        example: "script:RegisterCustomVariableChangedHandler(Enum.CustomVariableEntityType.Level, \"Score\", function(entity, varName)\n  print(\"Score changed!\")\nend)"
       },
       {
         name: "RegisterServerSignalHandler",
@@ -968,7 +996,8 @@ export const API_SYSTEMS = [
           { name: "callback", type: "fun(signalName: string, signalParams: ServerDataType[])", desc: "Callback receiving parameters array." }
         ],
         returns: "void",
-        desc: "Registers handler for server scripted signals (min ~100ms network latency)."
+        desc: "Registers handler for server scripted signals (min ~100ms network latency).",
+        example: "script:RegisterServerSignalHandler(\"STAGE_CLEAR\", function(signalName, params)\n  print(\"Received Stage Clear signal! Params:\", params[1])\nend)"
       },
       {
         name: "UnregisterCustomVariableChangedHandler",
@@ -997,17 +1026,17 @@ export const API_SYSTEMS = [
     description: "Instance representing an active or prepared interpolation of UI properties.",
     file: "library/Tween.d.lua",
     methods: [
-      { name: "Play", signature: "tween:Play()", params: [], returns: "Tween", desc: "Starts tween playback." },
-      { name: "Pause", signature: "tween:Pause()", params: [], returns: "void", desc: "Pauses playback." },
-      { name: "Resume", signature: "tween:Resume()", params: [], returns: "void", desc: "Resumes playback." },
-      { name: "Restart", signature: "tween:Restart()", params: [], returns: "void", desc: "Resets to initial values and starts playback." },
-      { name: "Complete", signature: "tween:Complete()", params: [], returns: "void", desc: "Immediately completes playback and invokes OnComplete." },
-      { name: "Kill", signature: "tween:Kill(complete)", params: [{ name: "complete", type: "boolean", desc: "Whether to invoke OnComplete." }], returns: "void", desc: "Destroys the tween instance." },
-      { name: "SetEase", signature: "tween:SetEase(easeType)", params: [{ name: "easeType", type: "EnumItem.EaseType", desc: "Easing curve function." }], returns: "Tween", desc: "Sets easing curve (e.g. Enum.EaseType.OutQuad, OutBack, InBounce)." },
-      { name: "SetLoops", signature: "tween:SetLoops(loops)", params: [{ name: "loops", type: "number", desc: "Number of loops (-1 for infinite)." }], returns: "Tween", desc: "Sets number of playback loops." },
-      { name: "SetRelative", signature: "tween:SetRelative(relative)", params: [{ name: "relative", type: "boolean", desc: "Whether target values are additive offsets." }], returns: "Tween", desc: "Sets relative tweening mode." },
-      { name: "SetOnComplete", signature: "tween:SetOnComplete(callback)", params: [{ name: "callback", type: "fun()", desc: "Completion callback." }], returns: "Tween", desc: "Sets callback invoked on finish." },
-      { name: "SetOnStepComplete", signature: "tween:SetOnStepComplete(callback)", params: [{ name: "callback", type: "fun()", desc: "Step callback." }], returns: "Tween", desc: "Sets callback invoked each loop/step." }
+      { name: "Play", signature: "tween:Play()", params: [], returns: "Tween", desc: "Starts tween playback.", example: "tween:Play()" },
+      { name: "Pause", signature: "tween:Pause()", params: [], returns: "void", desc: "Pauses playback.", example: "tween:Pause()" },
+      { name: "Resume", signature: "tween:Resume()", params: [], returns: "void", desc: "Resumes playback.", example: "tween:Resume()" },
+      { name: "Restart", signature: "tween:Restart()", params: [], returns: "void", desc: "Resets to initial values and starts playback.", example: "tween:Restart()" },
+      { name: "Complete", signature: "tween:Complete()", params: [], returns: "void", desc: "Immediately completes playback and invokes OnComplete.", example: "tween:Complete()" },
+      { name: "Kill", signature: "tween:Kill(complete)", params: [{ name: "complete", type: "boolean", desc: "Whether to invoke OnComplete." }], returns: "void", desc: "Destroys the tween instance.", example: "tween:Kill(true)" },
+      { name: "SetEase", signature: "tween:SetEase(easeType)", params: [{ name: "easeType", type: "EnumItem.EaseType", desc: "Easing curve function." }], returns: "Tween", desc: "Sets easing curve (e.g. Enum.EaseType.OutQuad, OutBack, InBounce).", example: "tween:SetEase(Enum.EaseType.OutQuad)" },
+      { name: "SetLoops", signature: "tween:SetLoops(loops)", params: [{ name: "loops", type: "number", desc: "Number of loops (-1 for infinite)." }], returns: "Tween", desc: "Sets number of playback loops.", example: "tween:SetLoops(-1)" },
+      { name: "SetRelative", signature: "tween:SetRelative(relative)", params: [{ name: "relative", type: "boolean", desc: "Whether target values are additive offsets." }], returns: "Tween", desc: "Sets relative tweening mode.", example: "tween:SetRelative(true)" },
+      { name: "SetOnComplete", signature: "tween:SetOnComplete(callback)", params: [{ name: "callback", type: "fun()", desc: "Completion callback." }], returns: "Tween", desc: "Sets callback invoked on finish.", example: "tween:SetOnComplete(function()\n  print(\"Animation finished\")\nend)" },
+      { name: "SetOnStepComplete", signature: "tween:SetOnStepComplete(callback)", params: [{ name: "callback", type: "fun()", desc: "Step callback." }], returns: "Tween", desc: "Sets callback invoked each loop/step.", example: "tween:SetOnStepComplete(function()\n  PlayTick()\nend)" }
     ]
   },
   {
@@ -1018,19 +1047,19 @@ export const API_SYSTEMS = [
     description: "Timeline sequencer for chaining and joining tweens, pauses, and callbacks across multiple UI controls.",
     file: "library/TweenSequence.d.lua",
     methods: [
-      { name: "Append", signature: "seq:Append(tween)", params: [{ name: "tween", type: "Tween", desc: "Tween to append." }], returns: "TweenSequence", desc: "Appends a Tween to the end of the sequence timeline." },
-      { name: "Join", signature: "seq:Join(tween)", params: [{ name: "tween", type: "Tween", desc: "Tween to play in parallel." }], returns: "TweenSequence", desc: "Inserts a Tween at the exact same start time as the previous Tween." },
-      { name: "AppendInterval", signature: "seq:AppendInterval(duration)", params: [{ name: "duration", type: "number", desc: "Wait duration in seconds." }], returns: "TweenSequence", desc: "Appends a timed delay interval." },
-      { name: "AppendCallback", signature: "seq:AppendCallback(callback)", params: [{ name: "callback", type: "fun()", desc: "Function to execute." }], returns: "TweenSequence", desc: "Appends a callback executed at that point in time." },
-      { name: "Insert", signature: "seq:Insert(time, tween)", params: [{ name: "time", type: "number", desc: "Time offset in seconds." }, { name: "tween", type: "Tween", desc: "Tween to insert." }], returns: "TweenSequence", desc: "Inserts a Tween at a specific timestamp." },
-      { name: "InsertCallback", signature: "seq:InsertCallback(time, callback)", params: [{ name: "time", type: "number", desc: "Time offset." }, { name: "callback", type: "fun()", desc: "Function." }], returns: "TweenSequence", desc: "Inserts a callback at timestamp." },
-      { name: "Play", signature: "seq:Play()", params: [], returns: "TweenSequence", desc: "Starts sequence playback." },
-      { name: "Pause", signature: "seq:Pause()", params: [], returns: "void", desc: "Pauses sequence playback." },
-      { name: "Resume", signature: "seq:Resume()", params: [], returns: "void", desc: "Resumes playback." },
-      { name: "Restart", signature: "seq:Restart()", params: [], returns: "void", desc: "Restarts playback from beginning." },
-      { name: "Kill", signature: "seq:Kill(complete)", params: [{ name: "complete", type: "boolean", desc: "Whether to invoke callbacks." }], returns: "void", desc: "Destroys the sequence." },
-      { name: "SetLoops", signature: "seq:SetLoops(loops)", params: [{ name: "loops", type: "number", desc: "Loop count (-1 infinite)." }], returns: "TweenSequence", desc: "Sets sequence loop count." },
-      { name: "SetOnComplete", signature: "seq:SetOnComplete(callback)", params: [{ name: "callback", type: "fun()", desc: "Completion function." }], returns: "TweenSequence", desc: "Sets final completion callback." }
+      { name: "Append", signature: "seq:Append(tween)", params: [{ name: "tween", type: "Tween", desc: "Tween to append." }], returns: "TweenSequence", desc: "Appends a Tween to the end of the sequence timeline.", example: "seq:Append(game.Tween(image, { anchoredPositionY = baseY + 140 }, 0.45):SetEase(Enum.EaseType.OutQuad))" },
+      { name: "Join", signature: "seq:Join(tween)", params: [{ name: "tween", type: "Tween", desc: "Tween to play in parallel." }], returns: "TweenSequence", desc: "Inserts a Tween at the exact same start time as the previous Tween.", example: "seq:Join(game.Tween(image, { localScaleX = 1.2 }, 0.45))" },
+      { name: "AppendInterval", signature: "seq:AppendInterval(duration)", params: [{ name: "duration", type: "number", desc: "Wait duration in seconds." }], returns: "TweenSequence", desc: "Appends a timed delay interval.", example: "seq:AppendInterval(0.25)" },
+      { name: "AppendCallback", signature: "seq:AppendCallback(callback)", params: [{ name: "callback", type: "fun()", desc: "Function to execute." }], returns: "TweenSequence", desc: "Appends a callback executed at that point in time.", example: "seq:AppendCallback(function()\n  PlaySoundEffect()\nend)" },
+      { name: "Insert", signature: "seq:Insert(time, tween)", params: [{ name: "time", type: "number", desc: "Time offset in seconds." }, { name: "tween", type: "Tween", desc: "Tween to insert." }], returns: "TweenSequence", desc: "Inserts a Tween at a specific timestamp.", example: "seq:Insert(0.5, game.Tween(image, { localScaleY = 1.1 }, 0.2))" },
+      { name: "InsertCallback", signature: "seq:InsertCallback(time, callback)", params: [{ name: "time", type: "number", desc: "Time offset." }, { name: "callback", type: "fun()", desc: "Function." }], returns: "TweenSequence", desc: "Inserts a callback at timestamp.", example: "seq:InsertCallback(1.0, function() SpawnParticle() end)" },
+      { name: "Play", signature: "seq:Play()", params: [], returns: "TweenSequence", desc: "Starts sequence playback.", example: "seq:Play()" },
+      { name: "Pause", signature: "seq:Pause()", params: [], returns: "void", desc: "Pauses sequence playback.", example: "seq:Pause()" },
+      { name: "Resume", signature: "seq:Resume()", params: [], returns: "void", desc: "Resumes playback.", example: "seq:Resume()" },
+      { name: "Restart", signature: "seq:Restart()", params: [], returns: "void", desc: "Restarts playback from beginning.", example: "seq:Restart()" },
+      { name: "Kill", signature: "seq:Kill(complete)", params: [{ name: "complete", type: "boolean", desc: "Whether to invoke callbacks." }], returns: "void", desc: "Destroys the sequence.", example: "seq:Kill(true)" },
+      { name: "SetLoops", signature: "seq:SetLoops(loops)", params: [{ name: "loops", type: "number", desc: "Loop count (-1 infinite)." }], returns: "TweenSequence", desc: "Sets sequence loop count.", example: "seq:SetLoops(2)" },
+      { name: "SetOnComplete", signature: "seq:SetOnComplete(callback)", params: [{ name: "callback", type: "fun()", desc: "Completion function." }], returns: "TweenSequence", desc: "Sets final completion callback.", example: "seq:SetOnComplete(function()\n  isBouncing = false\nend)" }
     ]
   },
   {
@@ -1050,7 +1079,8 @@ export const API_SYSTEMS = [
           { name: "b", type: "number", desc: "Blue 0-255." }
         ],
         returns: "ColorValue",
-        desc: "Creates an opaque ColorValue from RGB numbers 0-255."
+        desc: "Creates an opaque ColorValue from RGB numbers 0-255.",
+        example: "local gold = Color.FromRGB(247, 193, 56)"
       },
       {
         name: "FromRGBA",
@@ -1062,14 +1092,16 @@ export const API_SYSTEMS = [
           { name: "a", type: "number?", desc: "Alpha 0-255 (default 255)." }
         ],
         returns: "ColorValue",
-        desc: "Creates a ColorValue with transparency."
+        desc: "Creates a ColorValue with transparency.",
+        example: "local backdrop = Color.FromRGBA(8, 12, 20, 235)"
       },
       {
         name: "ToRGBA",
         signature: "Color.ToRGBA(color)",
         params: [{ name: "color", type: "ColorValue", desc: "The color to deconstruct." }],
         returns: "number r, number g, number b, number a",
-        desc: "Splits a ColorValue into four 0-255 RGBA components."
+        desc: "Splits a ColorValue into four 0-255 RGBA components.",
+        example: "local r, g, b, a = Color.ToRGBA(ball.color)"
       },
       {
         name: "Color()",
@@ -1081,7 +1113,8 @@ export const API_SYSTEMS = [
           { name: "a", type: "number?", desc: "Alpha 0-255." }
         ],
         returns: "ColorValue",
-        desc: "Global constructor shorthand for Color.FromRGBA."
+        desc: "Global constructor shorthand for Color.FromRGBA.",
+        example: "local col = Color(255, 200, 100, 255)"
       }
     ]
   },
@@ -1093,22 +1126,22 @@ export const API_SYSTEMS = [
     description: "Data transport object used to construct structured parameter payloads and dispatch signals to Server Node Graphs.",
     file: "library/ServerSignal.d.lua",
     methods: [
-      { name: "AddBool", signature: "signal:AddBool(value)", params: [{ name: "value", type: "boolean", desc: "Boolean value." }], returns: "void", desc: "Appends a boolean." },
-      { name: "AddBoolList", signature: "signal:AddBoolList(values)", params: [{ name: "values", type: "boolean[]", desc: "Array of booleans." }], returns: "void", desc: "Appends a list of booleans." },
-      { name: "AddInt", signature: "signal:AddInt(value)", params: [{ name: "value", type: "number", desc: "Integer number." }], returns: "void", desc: "Appends an integer parameter." },
-      { name: "AddIntList", signature: "signal:AddIntList(values)", params: [{ name: "values", type: "number[]", desc: "Array of integers." }], returns: "void", desc: "Appends a list of integers." },
-      { name: "AddFloat", signature: "signal:AddFloat(value)", params: [{ name: "value", type: "number", desc: "Floating point number." }], returns: "void", desc: "Appends a float." },
-      { name: "AddFloatList", signature: "signal:AddFloatList(values)", params: [{ name: "values", type: "number[]", desc: "Array of floats." }], returns: "void", desc: "Appends a list of floats." },
-      { name: "AddString", signature: "signal:AddString(value)", params: [{ name: "value", type: "string", desc: "String text." }], returns: "void", desc: "Appends a string." },
-      { name: "AddStringList", signature: "signal:AddStringList(values)", params: [{ name: "values", type: "string[]", desc: "Array of strings." }], returns: "void", desc: "Appends a list of strings." },
-      { name: "AddVector3", signature: "signal:AddVector3(value)", params: [{ name: "value", type: "Vector3", desc: "{x, y, z} table." }], returns: "void", desc: "Appends a 3D vector table." },
+      { name: "AddBool", signature: "signal:AddBool(value)", params: [{ name: "value", type: "boolean", desc: "Boolean value." }], returns: "void", desc: "Appends a boolean.", example: "signal:AddBool(true)" },
+      { name: "AddBoolList", signature: "signal:AddBoolList(values)", params: [{ name: "values", type: "boolean[]", desc: "Array of booleans." }], returns: "void", desc: "Appends a list of booleans.", example: "signal:AddBoolList({ true, false, true })" },
+      { name: "AddInt", signature: "signal:AddInt(value)", params: [{ name: "value", type: "number", desc: "Integer number." }], returns: "void", desc: "Appends an integer parameter.", example: "signal:AddInt(score)" },
+      { name: "AddIntList", signature: "signal:AddIntList(values)", params: [{ name: "values", type: "number[]", desc: "Array of integers." }], returns: "void", desc: "Appends a list of integers.", example: "signal:AddIntList({ 10, 20, 30 })" },
+      { name: "AddFloat", signature: "signal:AddFloat(value)", params: [{ name: "value", type: "number", desc: "Floating point number." }], returns: "void", desc: "Appends a float.", example: "signal:AddFloat(3.1415)" },
+      { name: "AddFloatList", signature: "signal:AddFloatList(values)", params: [{ name: "values", type: "number[]", desc: "Array of floats." }], returns: "void", desc: "Appends a list of floats.", example: "signal:AddFloatList({ 1.5, 2.5, 3.5 })" },
+      { name: "AddString", signature: "signal:AddString(value)", params: [{ name: "value", type: "string", desc: "String text." }], returns: "void", desc: "Appends a string.", example: "signal:AddString(\"STAGE_1\")" },
+      { name: "AddStringList", signature: "signal:AddStringList(values)", params: [{ name: "values", type: "string[]", desc: "Array of strings." }], returns: "void", desc: "Appends a list of strings.", example: "signal:AddStringList({ \"Player1\", \"Player2\" })" },
+      { name: "AddVector3", signature: "signal:AddVector3(value)", params: [{ name: "value", type: "Vector3", desc: "{x, y, z} table." }], returns: "void", desc: "Appends a 3D vector table.", example: "signal:AddVector3({ x = 10, y = 20, z = 0 })" },
       { name: "AddVector3List", signature: "signal:AddVector3List(values)", params: [{ name: "values", type: "Vector3[]", desc: "Array of Vector3 tables." }], returns: "void", desc: "Appends vector list." },
-      { name: "AddConfigId", signature: "signal:AddConfigId(value)", params: [{ name: "value", type: "number", desc: "Config ID integer." }], returns: "void", desc: "Appends a Config ID." },
-      { name: "AddEntity", signature: "signal:AddEntity(value)", params: [{ name: "value", type: "number", desc: "Entity ID." }], returns: "void", desc: "Appends an Entity ID." },
-      { name: "AddGuid", signature: "signal:AddGuid(value)", params: [{ name: "value", type: "number", desc: "GUID integer." }], returns: "void", desc: "Appends a GUID." },
-      { name: "AddPrefabId", signature: "signal:AddPrefabId(value)", params: [{ name: "value", type: "number", desc: "Prefab ID." }], returns: "void", desc: "Appends a Prefab ID." },
-      { name: "AddParam", signature: "signal:AddParam(type, value)", params: [{ name: "type", type: "EnumItem.ParamType", desc: "Enum.ParamType." }, { name: "value", type: "ServerDataType", desc: "Value matching type." }], returns: "void", desc: "Appends a generic parameter according to Enum.ParamType." },
-      { name: "SendSignal", signature: "signal:SendSignal()", params: [], returns: "void", desc: "Sends the signal to Node Graphs (Stage Entity is source)." }
+      { name: "AddConfigId", signature: "signal:AddConfigId(value)", params: [{ name: "value", type: "number", desc: "Config ID integer." }], returns: "void", desc: "Appends a Config ID.", example: "signal:AddConfigId(10001)" },
+      { name: "AddEntity", signature: "signal:AddEntity(value)", params: [{ name: "value", type: "number", desc: "Entity ID." }], returns: "void", desc: "Appends an Entity ID.", example: "signal:AddEntity(playerEntityId)" },
+      { name: "AddGuid", signature: "signal:AddGuid(value)", params: [{ name: "value", type: "number", desc: "GUID integer." }], returns: "void", desc: "Appends a GUID.", example: "signal:AddGuid(987654321)" },
+      { name: "AddPrefabId", signature: "signal:AddPrefabId(value)", params: [{ name: "value", type: "number", desc: "Prefab ID." }], returns: "void", desc: "Appends a Prefab ID.", example: "signal:AddPrefabId(501)" },
+      { name: "AddParam", signature: "signal:AddParam(type, value)", params: [{ name: "type", type: "EnumItem.ParamType", desc: "Enum.ParamType." }, { name: "value", type: "ServerDataType", desc: "Value matching type." }], returns: "void", desc: "Appends a generic parameter according to Enum.ParamType.", example: "signal:AddParam(Enum.ParamType.Int, 42)" },
+      { name: "SendSignal", signature: "signal:SendSignal()", params: [], returns: "void", desc: "Sends the signal to Node Graphs (Stage Entity is source).", example: "local signal = game.ServerSignal(\"STAGE_CLEAR\")\nsignal:AddInt(score)\nsignal:AddBool(true)\nsignal:SendSignal()" }
     ]
   },
   {
@@ -1119,13 +1152,13 @@ export const API_SYSTEMS = [
     description: "Event payload delivered to cursor callbacks when user clicks, drags, hovers, or releases mouse buttons.",
     file: "library/event_data/CursorEventData.d.lua",
     fields: [
-      { name: "dragging", type: "boolean", access: "Read", desc: "Whether user is currently dragging cursor." },
-      { name: "touchId", type: "number", access: "Read", desc: "The touch interaction type. -1 for cursor clicks, 0-4 for touch gestures on mobile devices." }
+      { name: "dragging", type: "boolean", access: "Read", desc: "Whether user is currently dragging cursor.", example: "if eventData.dragging then\n  local dx, dy = eventData:GetUIPosDelta()\n  UpdateScrollPosition(dx, dy)\nend" },
+      { name: "touchId", type: "number", access: "Read", desc: "The touch interaction type. -1 for cursor clicks, 0-4 for touch gestures on mobile devices.", example: "-- Check if mouse click vs touch gesture:\nif eventData.touchId == -1 then\n  print(\"Mouse Cursor Input\")\nelse\n  print(\"Touch Finger: \", eventData.touchId)\nend" }
     ],
     methods: [
-      { name: "GetUIPos", signature: "eventData:GetUIPos()", params: [], returns: "number x, number y", desc: "Returns cursor position at event moment from bottom-left corner." },
-      { name: "GetPressUIPos", signature: "eventData:GetPressUIPos()", params: [], returns: "number x, number y", desc: "Returns cursor position when button was initially pressed." },
-      { name: "GetUIPosDelta", signature: "eventData:GetUIPosDelta()", params: [], returns: "number deltaX, number deltaY", desc: "Returns distance cursor moved between start and end of event." }
+      { name: "GetUIPos", signature: "eventData:GetUIPos()", params: [], returns: "number x, number y", desc: "Returns cursor position at event moment from bottom-left corner.", example: "cursorArea:AddCursorEventListener(Enum.CursorEventType.CursorClick, function(eventData)\n  local cursorX, cursorY = eventData:GetUIPos()\n  updateAim(cursorX, cursorY)\n  shoot()\nend)" },
+      { name: "GetPressUIPos", signature: "eventData:GetPressUIPos()", params: [], returns: "number x, number y", desc: "Returns cursor position when button was initially pressed.", example: "local startX, startY = eventData:GetPressUIPos()" },
+      { name: "GetUIPosDelta", signature: "eventData:GetUIPosDelta()", params: [], returns: "number deltaX, number deltaY", desc: "Returns distance cursor moved between start and end of event.", example: "local dx, dy = eventData:GetUIPosDelta()" }
     ]
   },
   {
@@ -1136,13 +1169,13 @@ export const API_SYSTEMS = [
     description: "Exact execution lifecycle order for global scripts, control scripts, frames, and level updates.",
     file: "library/Global.d.lua",
     methods: [
-      { name: "OnInit", signature: "function OnInit()", params: [], returns: "void", desc: "Called immediately when the script/control is instantiated." },
-      { name: "OnEnable", signature: "function OnEnable()", params: [], returns: "void", desc: "Called when the control becomes active." },
-      { name: "OnStart", signature: "function OnStart()", params: [], returns: "void", desc: "Called immediately after OnEnable during initial setup." },
-      { name: "OnUpdate", signature: "function OnUpdate(deltaTime)", params: [{ name: "deltaTime", type: "number", desc: "Elapsed time in seconds since previous frame." }], returns: "void", desc: "Called every frame if script:EnableUpdate(true) is set." },
-      { name: "OnLevelUpdate", signature: "function OnLevelUpdate(levelDeltaTime)", params: [{ name: "levelDeltaTime", type: "number", desc: "Elapsed level time." }], returns: "void", desc: "Called each frame after OnUpdate when level time is NOT paused." },
-      { name: "OnDisable", signature: "function OnDisable()", params: [], returns: "void", desc: "Called when control is deactivated or before being destroyed." },
-      { name: "OnDestroy", signature: "function OnDestroy()", params: [], returns: "void", desc: "Called when control is destroyed or stage ends." }
+      { name: "OnInit", signature: "function OnInit()", params: [], returns: "void", desc: "Called immediately when the script/control is instantiated.", example: "function OnInit()\n  print(\"Script initialized\")\nend" },
+      { name: "OnEnable", signature: "function OnEnable()", params: [], returns: "void", desc: "Called when the control becomes active.", example: "function OnEnable()\n  print(\"Control enabled\")\nend" },
+      { name: "OnStart", signature: "function OnStart()", params: [], returns: "void", desc: "Called immediately after OnEnable during initial setup.", example: "function OnStart()\n  local control = script.object\n  script:EnableUpdate(true)\nend" },
+      { name: "OnUpdate", signature: "function OnUpdate(deltaTime)", params: [{ name: "deltaTime", type: "number", desc: "Elapsed time in seconds since previous frame." }], returns: "void", desc: "Called every frame if script:EnableUpdate(true) is set.", example: "function OnUpdate(deltaTime)\n  timeElapsed = timeElapsed + deltaTime\nend" },
+      { name: "OnLevelUpdate", signature: "function OnLevelUpdate(levelDeltaTime)", params: [{ name: "levelDeltaTime", type: "number", desc: "Elapsed level time." }], returns: "void", desc: "Called each frame after OnUpdate when level time is NOT paused.", example: "function OnLevelUpdate(levelDeltaTime)\n  physicsSimulation:Tick(levelDeltaTime)\nend" },
+      { name: "OnDisable", signature: "function OnDisable()", params: [], returns: "void", desc: "Called when control is deactivated or before being destroyed.", example: "function OnDisable()\n  print(\"Control deactivated\")\nend" },
+      { name: "OnDestroy", signature: "function OnDestroy()", params: [], returns: "void", desc: "Called when control is destroyed or stage ends.", example: "function OnDestroy()\n  script:EnableUpdate(false)\nend" }
     ]
   },
   {
@@ -1153,11 +1186,11 @@ export const API_SYSTEMS = [
     description: "Global runtime check utilities, logging, type inspection, and math extensions.",
     file: "library/Math.d.lua",
     methods: [
-      { name: "typeof", signature: "typeof(value)", params: [{ name: "value", type: "any", desc: "Target value." }], returns: "ApiType", desc: "Returns runtime type name ('ClientUIImageControl', 'Tween', 'number', 'string', etc.)." },
-      { name: "print", signature: "print(...)", params: [{ name: "...", type: "any", desc: "Values to log." }], returns: "void", desc: "Writes passed values to the log (Client Script logging must be enabled)." },
-      { name: "printerr", signature: "printerr(...)", params: [{ name: "...", type: "any", desc: "Values to log as error." }], returns: "void", desc: "Writes passed values to error log in red." },
-      { name: "math.isinf", signature: "math.isinf(n)", params: [{ name: "n", type: "number", desc: "Number to check." }], returns: "boolean", desc: "Checks whether a number is positive or negative infinity." },
-      { name: "math.isnan", signature: "math.isnan(n)", params: [{ name: "n", type: "number", desc: "Number to check." }], returns: "boolean", desc: "Checks whether a number is NaN." }
+      { name: "typeof", signature: "typeof(value)", params: [{ name: "value", type: "any", desc: "Target value." }], returns: "ApiType", desc: "Returns runtime type name ('ClientUIImageControl', 'Tween', 'number', 'string', etc.).", example: "if typeof(ctrl) == \"ClientUIImageControl\" then\n  ctrl:SetImage(Enum.ImageSource.StaticReference, 100001)\nend" },
+      { name: "print", signature: "print(...)", params: [{ name: "...", type: "any", desc: "Values to log." }], returns: "void", desc: "Writes passed values to the log (Client Script logging must be enabled).", example: "print(\"Player Score:\", score, \"Level:\", level)" },
+      { name: "printerr", signature: "printerr(...)", params: [{ name: "...", type: "any", desc: "Values to log as error." }], returns: "void", desc: "Writes passed values to error log in red.", example: "printerr(\"[Error] Could not find root control\")" },
+      { name: "math.isinf", signature: "math.isinf(n)", params: [{ name: "n", type: "number", desc: "Number to check." }], returns: "boolean", desc: "Checks whether a number is positive or negative infinity.", example: "if math.isinf(val) then val = 0 end" },
+      { name: "math.isnan", signature: "math.isnan(n)", params: [{ name: "n", type: "number", desc: "Number to check." }], returns: "boolean", desc: "Checks whether a number is NaN.", example: "if math.isnan(val) then val = 0 end" }
     ]
   }
 ];

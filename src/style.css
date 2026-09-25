@@ -917,9 +917,11 @@ html, body {
 .hl-kw { color: #e58282; font-weight: bold; }          /* keywords: function, local, if, return, end */
 .hl-str { color: #8ec07c; }                             /* strings */
 .hl-num { color: #83a598; }                             /* numbers */
-.hl-com { color: #6f5f45; font-style: italic; }         /* comments */
+.hl-com { color: #a4916c; font-style: italic; }         /* comments - visible warm parchment/gold */
 .hl-doc { color: #b892e8; }                             /* annotations: ---@param, ---@return */
 .hl-builtin { color: #fabd2f; font-weight: bold; }      /* game, script, Color, Enum */
+.hl-enum-type { color: #d3869b; font-weight: 600; }     /* Enum.KeyEventType, Enum.EaseType */
+.hl-enum-val { color: #b8bb26; font-weight: 500; }      /* CursorClick, OutQuad, KeyboardJumpKeyDown */
 .hl-fn { color: #eed9ab; }                              /* function names */
 .hl-op { color: #a18a5e; }                              /* operators +, -, ==, :, . */
 .hl-bool { color: #d3869b; }                            /* true, false, nil */

@@ -1876,7 +1876,14 @@ export class MiliastraSimulator {
     if (!this.isRunning) return;
 
     this.animationFrameId = requestAnimationFrame((now) => {
-      const dt = Math.min((now - this.lastTime) / 1000, 0.1);
+      const elapsed = now - this.lastTime;
+      // Throttle to 60 FPS (~16.6ms) to prevent excessive GPU utilization on high-refresh-rate displays
+      if (elapsed < 15.5) {
+        this.loop();
+        return;
+      }
+
+      const dt = Math.min(elapsed / 1000, 0.1);
       this.lastTime = now;
 
       // Calculate FPS

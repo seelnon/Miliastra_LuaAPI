@@ -1,9 +1,21 @@
+-- =========  Setup Inside Miliastra Client Control Templates  ============
+
 -- TextBox_Instance ID - 1073741852
 -- Image_Instance ID - 1073741853
 -- PresetButton_Instance ID - 1073741854
 -- Container Control ID - 1073741855
 -- CursorEventArea ID - 1073741856
 -- Rectangle reference asset - 100001
+
+-- ========================================================================
+-- In Miliastra those IDs has to be created as templates in the 'Manage UI Control Groups' menu and submenu of 'UI Control Group Library' -> 'Client Control Templates'
+-- Those are pretty much 'Prefabs' and Instantiation == Create Prefab node. 
+-- Better to just create defaults and save them as templates without editing.
+-- Every single one instantiated and adjusted later on procedurally by code, so it is easier to work with the most defaults.
+-- (I had problems with scale being setup in the editor of x=0.2 y=0.2 instead of default x=1 y=1 and I had to force x=1 y=1 via code)
+-- (nothing too crazy, but you will have to write defaults in the code, before adjusting them, so it is easier to just leave them be from the get go)
+-- ========================================================================
+
 
 local BOARD_WIDTH = 10
 local BOARD_HEIGHT = 20
@@ -70,6 +82,9 @@ local colors = {
 
 local pieceTypes = {"I", "J", "L", "O", "S", "T", "Z"}
 
+-- Instantiation tech, so it creates a new piece, not references the same "T", "J", etc. Master table + copy.
+-- Other variant is to have all shape types as a local inside the function, but it recreates the whole table every time.
+
 local function copyMatrix(matrix)
         local copy = {}
         for row = 1, #matrix do
@@ -100,6 +115,9 @@ local function rotateMatrix(matrix, clockwise)
         return rotated
 end
 
+-- Take the pieces 'setup' from overhead locals and create a new piece with a random type and its corresponding matrix 
+-- (matrix is the 1,0,1 setups in 'shapes') by invoking 'copyMatrix' - the weird # is array/list/table length
+
 local function newPiece()
         local pieceType = pieceTypes[math.random(1, #pieceTypes)]
         return {type = pieceType, matrix = copyMatrix(shapes[pieceType])}
@@ -113,6 +131,9 @@ local function clearBoard()
                 end
         end
 end
+
+-- Piece itself checks for overlaps and collisions, asking its matrix if it is out of bounds or overlapping with other pieces on the board, or if it is overlapping with the active pieces that are falling down.
+-- also with row + 1 it does predictive collision, so it can stop when it is touching the ground or other pieces -> bakes it -> new piece. Game loop is done, lol.
 
 local function isOccupied(column, row, matrix, includeActive, ignoredActive)
         for matrixRow = 1, #matrix do
@@ -147,6 +168,8 @@ local function isOccupied(column, row, matrix, includeActive, ignoredActive)
         return false
 end
 
+-- A way to stop pieces from going away into the cosmos, because cursor can.
+
 local function clampHand()
         if not currentPiece then
                 return
@@ -155,12 +178,17 @@ local function clampHand()
         handY = math.max(1, math.min(BOARD_HEIGHT - #currentPiece.matrix + 1, handY))
 end
 
+-- invoking function rotateMatrix(matrix, clockwise)
+-- 'counter clockwise' is false of 'clockwise', so we only check for 1 option, if not = other option. line 110
+
 local function rotateCurrent(clockwise)
         if currentPiece and not gameOver then
                 currentPiece.matrix = rotateMatrix(currentPiece.matrix, clockwise)
                 clampHand()
         end
 end
+
+-- Modyfier for later instantiated 'Image_Instance' of active pieces during redraw().
 
 local function setCell(cell, column, row, color, visible)
         cell:SetAnchorMin(0, 0)
@@ -173,6 +201,8 @@ local function setCell(cell, column, row, color, visible)
         cell.imageColor = color
         cell:SetVisible(visible)
 end
+
+-- Shake effect for when a piece is locked in place or lines are cleared. The shake strength and timer are updated based on the number of lines cleared, creating a visual feedback for the player.
 
 local function triggerShake(strength)
         shakeStrength = math.max(shakeStrength, strength)
@@ -232,6 +262,9 @@ local function setPanelText(control, text, x, y, width, height, size)
         control.bgColor = Color.FromRGBA(0, 0, 0, 0)
 end
 
+-- Preview to show the next piece, it runs every frame, a bit overkill.
+-- But idk how heavy it is to call Miliastra's UI properties every frame. (needs testing). Generally better to run on demand, not on every frame.
+
 local function redrawNextPieces()
         for _, previewCell in ipairs(nextPreviewCells) do
                 previewCell:SetVisible(false)
@@ -261,6 +294,10 @@ local function redrawNextPieces()
                 end
         end
 end
+
+-- redrawing every frame, no pieces are created as objects, they are just 'paint'
+-- optimisation could be done by separating real time things, so they run on their own 'tick' timer. (how much performance on that.. idk)
+-- it is accessing UI properties in the miliastra every frame, so idk... 
 
 local function redraw()
         if container then
@@ -354,6 +391,9 @@ local function redraw()
         redrawNextPieces()
 end
 
+-- Baking. row + 1 gives a 'raycast' to predict collision. Writes the piece into the grid, so it is no longer falling, but part of the board. It is now a static piece.
+-- Board is now 1 thing, not a bunch of pieces, so it is easier to check for collisions and overlaps. It is now a 'painted' board, not a bunch of objects.
+
 local function lockPiece(piece, column, row)
         while row < BOARD_HEIGHT and not isOccupied(column, row + 1, piece.matrix, false) do
                 row = row + 1
@@ -417,6 +457,8 @@ local function spawnNext()
         handY = 1
         fallTimer = 0
 end
+
+-- Just the shoot part. Invoked on click, other is on 'updateAim' that updates the ghost.
 
 local function shoot()
         if gameOver then
@@ -497,6 +539,9 @@ local function setupButtonLabel(control, text, x, y)
         control.bgColor = Color.FromRGBA(0, 0, 0, 0)
 end
 
+-- The cursor position is converted to board coordinates, and the hand position is updated accordingly. The hand position is then clamped to ensure it stays within the bounds of the board.
+-- This function is called whenever the cursor moves.
+
 local function updateAim(cursorX, cursorY)
         if not currentPiece then
                 return
@@ -544,6 +589,8 @@ findNearbyPlacement = function(piece, targetX, targetY)
         end
         return bestX, bestY
 end
+
+-- Drawing Static stuff, turning real time checks on with: script:EnableUpdate(true)
 
 function OnStart()
         local host = script.object
@@ -710,6 +757,8 @@ function OnStart()
         script:EnableUpdate(true)
         redraw()
 end
+
+-- Running real time all relative functions.
 
 function OnUpdate(deltaTime)
         updateEffects(deltaTime)
