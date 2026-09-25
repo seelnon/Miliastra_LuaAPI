@@ -789,7 +789,7 @@ export class MiliastraSimulator {
       }
     }
 
-    if (inside && (control.raycastTarget || control.interactable || Object.keys(control.cursorListeners).length > 0)) {
+    if (inside && (control.raycastTarget || Object.keys(control.cursorListeners).length > 0)) {
       hits.push(control);
     }
     return hits;

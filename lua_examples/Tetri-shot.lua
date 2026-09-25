@@ -620,6 +620,7 @@ local function setupButtonLabel(control, text, x, y)
         control.text = text
         control.fontSize = 14
         control.fontColor = Color.FromRGBA(255, 255, 255, 255)
+        control.bgColor = Color.FromRGBA(36, 42, 56, 235)
 end
 
 -- The cursor position is converted to board coordinates, and the hand position is updated accordingly. The hand position is then clamped to ensure it stays within the bounds of the board.
