@@ -3,7 +3,7 @@
 // Brutalist Elden-Coffee design, syntax-highlighted signatures, collapsible rows
 // ============================================================================
 
-import { highlightLua, highlightMethodSignature, highlightType } from './syntax-highlighter.js';
+import { highlightLua, highlightMethodSignature, highlightType, highlightEnumItem } from './syntax-highlighter.js';
 
 export function showToast(message) {
   const existing = document.querySelector('.rune-toast');
@@ -258,7 +258,7 @@ export function renderEnumDetail(en, targetItem = null) {
         <tbody>
           ${en.items.map(item => `
             <tr class="field-row ${targetItem === item.name ? 'highlighted-row' : ''}">
-              <td><strong class="hl-field-name">${en.name}.${item.name}</strong></td>
+              <td><strong class="hl-field-name">${highlightEnumItem(`${en.name}.${item.name}`)}</strong></td>
               ${en.items.some(i => i.defaultBind) ? `<td><span class="inline-rune">${item.defaultBind || '—'}</span></td>` : ''}
               <td>${item.desc}</td>
               <td>
