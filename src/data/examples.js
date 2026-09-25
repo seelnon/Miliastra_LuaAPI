@@ -5,6 +5,27 @@
 // using new URL(...) and fetch() with bundling and in-memory caching.
 // ============================================================================
 
+// Vite raw glob import loads every actual .lua file as static strings during build/dev
+const rawLuaModulesRoot = 2;
+const rawLuaModulesRel = 1;
+
+const bundledLuaFiles = { ...rawLuaModulesRoot, ...rawLuaModulesRel };
+
+// In-memory cache for fetched and parsed .lua files
+const luaCache = new Map();
+
+/**
+ * Resolves static bundle string fallback if present
+ */
+function getBundledLuaSource(filename) {
+  const cleanName = filename.replace(/^(\/|lua_examples\/)/, '');
+  for (const [key, content] of Object.entries(bundledLuaFiles)) {
+    if (key.endsWith(`/${cleanName}`) || key.endsWith(cleanName)) {
+      return typeof content === 'string' ? content.replace(/^\uFEFF/, '') : '';
+    }
+  }
+  return '';
+}
 
 /**
  * Fetches a raw .lua file from the static web server using new URL() and fetch(),
