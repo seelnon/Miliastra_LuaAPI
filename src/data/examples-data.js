@@ -3,7 +3,7 @@
 // Parsed directly from .lua files in /lua_examples via Vite raw glob & JSON manifest
 // ============================================================================
 
-import examplesManifest from './examples.json';
+import {examples} from './examples.js';
 
 // Vite raw glob import loads every actual .lua file in /lua_examples at runtime
 const rawLuaModulesRoot = import.meta.glob('/lua_examples/*.lua', {
@@ -30,7 +30,7 @@ function resolveLuaSource(filename) {
   return '';
 }
 
-export const LUA_EXAMPLES = examplesManifest.map(entry => {
+export const LUA_EXAMPLES = examples.map(entry => {
   const rawCode = resolveLuaSource(entry.filename);
   return {
     ...entry,
