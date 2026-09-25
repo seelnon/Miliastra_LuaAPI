@@ -9,111 +9,366 @@ import { openLuaRunnerModal } from './lua-runner-modal.js';
 
 export const SNIPPETS = [
   {
-    name: "Tween Sequence Bounce",
-    code: `local image = script.object
-local seq = game.TweenSequence()
+    name: "Tween Sequence Squash & Stretch",
+    code: `-- Template IDs:
+local IMAGE_TEMPLATE = 1073741850
+local CIRCLE_ASSET = 100002
 
-seq:Append(game.Tween(image, {
-    anchoredPositionY = 150,
-    localScaleX = 0.9,
-    localScaleY = 1.1
-}, 0.4):SetEase(Enum.EaseType.OutQuad))
+function OnStart()
+    local root = script.object
+    local width, height = game.GetUICanvasSize()
 
-seq:Append(game.Tween(image, {
-    anchoredPositionY = 0,
-    localScaleX = 1.1,
-    localScaleY = 0.9
-}, 0.25):SetEase(Enum.EaseType.InQuad))
+    -- 1. Instantiate test ImageControl at viewport center
+    local image = game.InstantiateClientUIControl(IMAGE_TEMPLATE, root)
+    image.name = "BouncingOrb"
+    image:SetAnchorMin(0.5, 0.5)
+    image:SetAnchorMax(0.5, 0.5)
+    image:SetPivot(0.5, 0.5)
+    image:SetAnchoredPosition(0, -50)
+    image:SetSizeDelta(120, 120)
+    image:SetImage(Enum.ImageSource.StaticReference, CIRCLE_ASSET)
+    image.imageColor = Color(220, 180, 85, 255)
 
-seq:Append(game.Tween(image, {
-    localScaleX = 1.0,
-    localScaleY = 1.0
-}, 0.15):SetEase(Enum.EaseType.OutBack))
+    print("Instantiated", image.name, "ID:", image.id)
 
-seq:Play()`
-  },
-  {
-    name: "Key Event Listener",
-    code: `function OnStart()
-    local button = script.object
-    button:AddKeyEventListener(Enum.KeyEventType.KeyboardJumpKeyDown, function()
-        print("Jump key pressed! Consuming event.")
-        return true -- Mark event as handled/consumed
-    end)
+    -- 2. Build continuous squash-and-stretch bounce sequence
+    local seq = game.TweenSequence()
+    seq:Append(game.Tween(image, {
+        anchoredPositionY = 150,
+        localScaleX = 0.85,
+        localScaleY = 1.25
+    }, 0.45):SetEase(Enum.EaseType.OutQuad))
+
+    seq:Append(game.Tween(image, {
+        anchoredPositionY = -50,
+        localScaleX = 1.35,
+        localScaleY = 0.65
+    }, 0.35):SetEase(Enum.EaseType.InQuad))
+
+    seq:Append(game.Tween(image, {
+        localScaleX = 1.0,
+        localScaleY = 1.0
+    }, 0.18):SetEase(Enum.EaseType.OutBack))
+
+    seq:SetLoops(-1) -- Repeat infinitely
+    seq:Play()
+    print("Bounce sequence playing at 60 FPS.")
 end`
   },
   {
-    name: "Full Lifecycle Script",
-    code: `function OnInit()
-    print("OnInit called")
-end
+    name: "1s Color Pulse (Pure Color API)",
+    code: `-- Template IDs:
+local IMAGE_TEMPLATE = 1073741850
+local TEXTBOX_TEMPLATE = 1073741849
+local CIRCLE_ASSET = 100002
 
-function OnEnable()
-    print("OnEnable called")
+local orb = nil
+local label = nil
+local timer = 0
+
+local function GetRandomColor()
+    local r = math.random(60, 255)
+    local g = math.random(60, 255)
+    local b = math.random(60, 255)
+    return Color.FromRGBA(r, g, b, 255)
 end
 
 function OnStart()
-    print("OnStart called")
+    local root = script.object
+    local width, height = game.GetUICanvasSize()
+    math.randomseed(os.time())
+
+    -- 1. Instantiate glowing color orb
+    orb = game.InstantiateClientUIControl(IMAGE_TEMPLATE, root)
+    orb.name = "ColorPulseOrb"
+    orb:SetAnchorMin(0.5, 0.5)
+    orb:SetAnchorMax(0.5, 0.5)
+    orb:SetPivot(0.5, 0.5)
+    orb:SetAnchoredPosition(0, 40)
+    orb:SetSizeDelta(140, 140)
+    orb:SetImage(Enum.ImageSource.StaticReference, CIRCLE_ASSET)
+
+    -- 2. Instantiate descriptive text HUD
+    label = game.InstantiateClientUIControl(TEXTBOX_TEMPLATE, root)
+    label.name = "ColorHUD"
+    label:SetAnchorMin(0.5, 0.5)
+    label:SetAnchorMax(0.5, 0.5)
+    label:SetPivot(0.5, 0.5)
+    label:SetAnchoredPosition(0, -70)
+    label:SetSizeDelta(460, 50)
+    label.fontSize = 17
+    label.fontColor = Color.FromRGB(238, 217, 171)
+
+    -- Set initial color using standard Miliastra Color.FromRGB
+    local initCol = Color.FromRGB(201, 160, 89)
+    orb.imageColor = initCol
+    local r, g, b, a = Color.ToRGBA(initCol)
+    label.text = string.format("COLOR: RGBA(%d, %d, %d, %d)", r, g, b, a)
+    print(string.format("[Init] Color set to RGBA(%d, %d, %d, %d)", r, g, b, a))
+
     script:EnableUpdate(true)
 end
 
 function OnUpdate(deltaTime)
-    -- Called each frame with delta time in seconds
+    timer = timer + deltaTime
+    if timer >= 1.0 then
+        timer = timer - 1.0
+        local nextCol = GetRandomColor()
+        orb.imageColor = nextCol
+        
+        local r, g, b, a = Color.ToRGBA(nextCol)
+        label.text = string.format("COLOR: RGBA(%d, %d, %d, %d)", r, g, b, a)
+        print(string.format("[1s Color Pulse] New Color -> RGBA(%d, %d, %d, %d)", r, g, b, a))
+
+        -- Punch scale on color shift
+        game.Tween(orb, { localScaleX = 1.15, localScaleY = 1.15 }, 0.1)
+            :SetEase(Enum.EaseType.OutQuad)
+            :SetOnComplete(function()
+                game.Tween(orb, { localScaleX = 1.0, localScaleY = 1.0 }, 0.2)
+                    :SetEase(Enum.EaseType.OutBack)
+            end)
+    end
+end`
+  },
+  {
+    name: "Interactive Button (Click & Key)",
+    code: `-- Template IDs:
+local PRESET_BUTTON_TEMPLATE = 1073741851
+local TEXTBOX_TEMPLATE = 1073741849
+
+function OnStart()
+    local root = script.object
+
+    -- 1. Instantiate interactive button
+    local btn = game.InstantiateClientUIControl(PRESET_BUTTON_TEMPLATE, root)
+    btn.name = "TestButton"
+    btn:SetAnchorMin(0.5, 0.5)
+    btn:SetAnchorMax(0.5, 0.5)
+    btn:SetPivot(0.5, 0.5)
+    btn:SetAnchoredPosition(0, 0)
+    btn:SetSizeDelta(280, 68)
+    btn.imageColor = Color(52, 42, 30, 255)
+    btn.interactable = true
+    btn.raycastTarget = true
+
+    -- 2. Button Label
+    local label = game.InstantiateClientUIControl(TEXTBOX_TEMPLATE, btn)
+    label:SetAnchorMin(0.5, 0.5)
+    label:SetAnchorMax(0.5, 0.5)
+    label:SetPivot(0.5, 0.5)
+    label:SetAnchoredPosition(0, 0)
+    label:SetSizeDelta(280, 68)
+    label.fontSize = 15
+    label.fontColor = Color(238, 217, 171, 255)
+    label.text = "CLICK ME OR PRESS SPACE"
+
+    local clicks = 0
+    local function HandleAction(source)
+        clicks = clicks + 1
+        label.text = "ACTIVATED x" .. clicks .. " (" .. source .. ")"
+        print("[Interaction]", source, "count:", clicks)
+
+        -- Punch button scale
+        game.Tween(btn, { localScaleX = 1.15, localScaleY = 1.15 }, 0.08)
+            :SetEase(Enum.EaseType.OutQuad)
+            :SetOnComplete(function()
+                game.Tween(btn, { localScaleX = 1.0, localScaleY = 1.0 }, 0.15)
+                    :SetEase(Enum.EaseType.OutBack)
+            end)
+    end
+
+    btn:AddCursorEventListener(Enum.CursorEventType.CursorClick, function(eventData)
+        HandleAction("Mouse Click")
+    end)
+
+    btn:AddKeyEventListener(Enum.KeyEventType.KeyboardJumpKeyDown, function()
+        HandleAction("Space Key")
+        return true
+    end)
+
+    print("Interactive button ready. Click or hit [Space]!")
+end`
+  },
+  {
+    name: "Multi-Object Orbit Simulation",
+    code: `-- Template IDs:
+local IMAGE_TEMPLATE = 1073741850
+local CIRCLE_ASSET = 100002
+
+local satellites = {}
+local currentAngle = 0
+
+function OnStart()
+    local root = script.object
+
+    -- Center Star
+    local star = game.InstantiateClientUIControl(IMAGE_TEMPLATE, root)
+    star:SetAnchorMin(0.5, 0.5)
+    star:SetAnchorMax(0.5, 0.5)
+    star:SetPivot(0.5, 0.5)
+    star:SetAnchoredPosition(0, 0)
+    star:SetSizeDelta(84, 84)
+    star:SetImage(Enum.ImageSource.StaticReference, CIRCLE_ASSET)
+    star.imageColor = Color(230, 185, 75, 255)
+
+    -- 4 Orbiting Satellites
+    for i = 1, 4 do
+        local sat = game.InstantiateClientUIControl(IMAGE_TEMPLATE, root)
+        sat:SetAnchorMin(0.5, 0.5)
+        sat:SetAnchorMax(0.5, 0.5)
+        sat:SetPivot(0.5, 0.5)
+        sat:SetSizeDelta(32, 32)
+        sat:SetImage(Enum.ImageSource.StaticReference, CIRCLE_ASSET)
+        sat.imageColor = Color(120 + i * 30, 80 + i * 35, 210, 255)
+        table.insert(satellites, sat)
+    end
+
+    print("Orbit simulation instantiated with 4 satellites.")
+    script:EnableUpdate(true)
 end
 
-function OnLevelUpdate(levelDeltaTime)
-    -- Pauses when level time pauses
+function OnUpdate(dt)
+    currentAngle = currentAngle + dt * 2.5
+    local radius = 140
+    for i, sat in ipairs(satellites) do
+        local offset = currentAngle + (i - 1) * (math.pi * 0.5)
+        local px = math.cos(offset) * radius
+        local py = math.sin(offset) * radius
+        sat:SetAnchoredPosition(px, py)
+    end
+end`
+  },
+  {
+    name: "Lifecycle & Real-Time FPS HUD",
+    code: `local TEXTBOX_TEMPLATE = 1073741849
+local totalTime = 0
+local frameCount = 0
+local hud = nil
+
+function OnInit()
+    print("[Lifecycle] OnInit executed")
+end
+
+function OnEnable()
+    print("[Lifecycle] OnEnable executed")
+end
+
+function OnStart()
+    print("[Lifecycle] OnStart executed. Enabling 60FPS updates.")
+    local root = script.object
+    
+    hud = game.InstantiateClientUIControl(TEXTBOX_TEMPLATE, root)
+    hud.name = "LifecycleHUD"
+    hud:SetAnchorMin(0.5, 0.5)
+    hud:SetAnchorMax(0.5, 0.5)
+    hud:SetPivot(0.5, 0.5)
+    hud:SetAnchoredPosition(0, 0)
+    hud:SetSizeDelta(480, 80)
+    hud.fontSize = 17
+    hud.fontColor = Color(220, 190, 120, 255)
+    hud.text = "Initializing runtime loop..."
+
+    script:EnableUpdate(true)
+end
+
+function OnUpdate(deltaTime)
+    totalTime = totalTime + deltaTime
+    frameCount = frameCount + 1
+    if hud then
+        local fps = math.floor(1 / math.max(deltaTime, 0.0001))
+        hud.text = string.format("FRAME: %d  |  TIME: %.2fs  |  DT: %.4fs  |  %d FPS", frameCount, totalTime, deltaTime, fps)
+    end
 end
 
 function OnDisable()
-    print("OnDisable called")
+    print("[Lifecycle] OnDisable executed")
 end
 
 function OnDestroy()
-    print("OnDestroy called")
+    print("[Lifecycle] OnDestroy executed")
 end`
   },
   {
-    name: "Custom Variable Watcher",
-    code: `function OnStart()
-    script:RegisterCustomVariableChangedHandler(
-        Enum.CustomVariableEntityType.Level,
-        "Score",
-        function(entity, varName)
-            local val = game.GetGlobalCustomVariableValue(entity, varName)
-            print("Score changed to:", val)
-        end
-    )
-end`
-  },
-  {
-    name: "Server Signal Dispatch",
-    code: `local signal = game.ServerSignal("STAGE_CLEAR")
-signal:AddInt(100)
-signal:AddString("VICTORY")
-signal:SendSignal()`
-  },
-  {
-    name: "Color & Vector Math",
-    code: `local col = Color(255, 200, 100, 255)
-local hex = col:ToHex()
-print("Color Hex:", hex)
+    name: "Server Signal Dispatch Banner",
+    code: `-- Template IDs:
+local IMAGE_TEMPLATE = 1073741850
+local TEXTBOX_TEMPLATE = 1073741849
 
-local width, height = game.GetUICanvasSize()
-print("Canvas viewport size:", width, "x", height)`
+function OnStart()
+    local root = script.object
+
+    -- 1. Instantiate banner card
+    local card = game.InstantiateClientUIControl(IMAGE_TEMPLATE, root)
+    card:SetAnchorMin(0.5, 0.5)
+    card:SetAnchorMax(0.5, 0.5)
+    card:SetPivot(0.5, 0.5)
+    card:SetAnchoredPosition(0, 0)
+    card:SetSizeDelta(420, 90)
+    card.imageColor = Color(40, 32, 24, 255)
+
+    -- 2. Banner text
+    local txt = game.InstantiateClientUIControl(TEXTBOX_TEMPLATE, card)
+    txt:SetAnchorMin(0.5, 0.5)
+    txt:SetAnchorMax(0.5, 0.5)
+    txt:SetPivot(0.5, 0.5)
+    txt:SetAnchoredPosition(0, 0)
+    txt:SetSizeDelta(400, 80)
+    txt.fontSize = 15
+    txt.fontColor = Color(240, 215, 140, 255)
+    txt.text = "DISPATCHING SERVER SIGNAL..."
+
+    -- 3. Construct and send signal
+    local signal = game.ServerSignal("STAGE_CLEARED")
+    signal:AddInt(101)
+    signal:AddString("VICTORY")
+    signal:AddFloat(99.4)
+    signal:SendSignal()
+
+    txt.text = "SIGNAL 'STAGE_CLEARED' DISPATCHED!\\n[Int: 101  |  Str: 'VICTORY'  |  Float: 99.4]"
+    print("Signal 'STAGE_CLEARED' dispatched successfully.")
+end`
   }
 ];
 
 export function renderScratchpad(container, initialCode = '') {
-  const defaultCode = initialCode || `-- Miliastra Lua Scratchpad
--- Interactive script editor with real-time syntax highlighting
+  const defaultCode = initialCode || `-- Template IDs:
+local IMAGE_TEMPLATE = 1073741850
+local TEXTBOX_TEMPLATE = 1073741849
+local CIRCLE_ASSET = 100002
 
 function OnStart()
-    local control = script.object
-    print("Mounted control ID:", control.id)
-    
+    local root = script.object
     local width, height = game.GetUICanvasSize()
-    print("Canvas viewport:", width, "x", height)
+    print("Canvas Initialized:", width, "x", height)
+
+    -- 1. Instantiate a test ImageControl at center of screen
+    local orb = game.InstantiateClientUIControl(IMAGE_TEMPLATE, root)
+    orb.name = "CenterOrb"
+    orb:SetAnchorMin(0.5, 0.5)
+    orb:SetAnchorMax(0.5, 0.5)
+    orb:SetPivot(0.5, 0.5)
+    orb:SetAnchoredPosition(0, 20)
+    orb:SetSizeDelta(110, 110)
+    orb:SetImage(Enum.ImageSource.StaticReference, CIRCLE_ASSET)
+    orb.imageColor = Color(212, 175, 85, 255)
+
+    -- 2. Instantiate label
+    local label = game.InstantiateClientUIControl(TEXTBOX_TEMPLATE, root)
+    label:SetAnchorMin(0.5, 0.5)
+    label:SetAnchorMax(0.5, 0.5)
+    label:SetPivot(0.5, 0.5)
+    label:SetAnchoredPosition(0, -65)
+    label:SetSizeDelta(400, 40)
+    label.fontSize = 16
+    label.fontColor = Color(238, 217, 171, 255)
+    label.text = "Miliastra 60 FPS Simulation Ready"
+
+    -- 3. Live scale pulse tween
+    game.Tween(orb, { localScaleX = 1.3, localScaleY = 1.3 }, 0.55)
+        :SetEase(Enum.EaseType.InOutQuad)
+        :SetLoops(-1)
+
+    print("Simulation active! Press [SIMULATE (60 FPS)] to run.")
 end`;
 
   container.innerHTML = `
@@ -253,7 +508,7 @@ end`;
         showToast('[ Error: Scratchpad is empty ]');
         return;
       }
-      openLuaRunnerModal(code, 'Scratchpad Simulation (60 FPS)');
+      openLuaRunnerModal(code, 'Scratchpad Simulation (60 FPS)', () => textarea.value);
     });
   }
 

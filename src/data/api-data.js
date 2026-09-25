@@ -1119,6 +1119,22 @@ export const API_SYSTEMS = [
     ]
   },
   {
+    id: "Vector3",
+    name: "Vector3",
+    category: "Math & Types",
+    badge: "Class",
+    description: "3D Cartesian vector with full vector arithmetic (+, -, *, /), magnitude, normalization, dot and cross products.",
+    file: "library/addons/Vector3.d.lua",
+    methods: [
+      { name: "Vector3()", signature: "Vector3(x, y, z)", params: [{ name: "x", type: "number", desc: "X coordinate." }, { name: "y", type: "number", desc: "Y coordinate." }, { name: "z", type: "number", desc: "Z coordinate." }], returns: "Vector3", desc: "Constructs a new 3D vector. Also available as Vector3.new(x, y, z).", example: "local pos = Vector3(480, 320, 0)" },
+      { name: "Magnitude", signature: "vec:Magnitude()", params: [], returns: "number", desc: "Calculates the geometric length of the vector.", example: "local len = vel:Magnitude()" },
+      { name: "Normalize", signature: "vec:Normalize()", params: [], returns: "Vector3", desc: "Returns a unit vector pointing in the same direction.", example: "local dir = vel:Normalize()" },
+      { name: "Dot", signature: "vec:Dot(other)", params: [{ name: "other", type: "Vector3", desc: "Second vector." }], returns: "number", desc: "Computes the scalar dot product.", example: "local dot = dirA:Dot(dirB)" },
+      { name: "Cross", signature: "vec:Cross(other)", params: [{ name: "other", type: "Vector3", desc: "Second vector." }], returns: "Vector3", desc: "Computes the perpendicular 3D cross product vector.", example: "local normal = up:Cross(forward)" },
+      { name: "ToString", signature: "vec:ToString()", params: [], returns: "string", desc: "Formats vector into a readable string.", example: "print(\"Position:\", pos:ToString())" }
+    ]
+  },
+  {
     id: "ServerSignal",
     name: "ServerSignal",
     category: "Networking",

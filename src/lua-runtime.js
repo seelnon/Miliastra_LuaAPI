@@ -199,6 +199,30 @@ export class VirtualUIControl {
     this.sizeDeltaY = Number(h) || 0;
   }
 
+  SetLocalScale(x, y, z) {
+    this.localScaleX = x !== undefined && !isNaN(Number(x)) ? Number(x) : 1;
+    this.localScaleY = y !== undefined && !isNaN(Number(y)) ? Number(y) : 1;
+    this.localScaleZ = z !== undefined && !isNaN(Number(z)) ? Number(z) : 1;
+  }
+
+  SetLocalRotation(x, y, z) {
+    this.localRotationX = x !== undefined && !isNaN(Number(x)) ? Number(x) : 0;
+    this.localRotationY = y !== undefined && !isNaN(Number(y)) ? Number(y) : 0;
+    this.localRotationZ = z !== undefined && !isNaN(Number(z)) ? Number(z) : 0;
+  }
+
+  SetActive(active) {
+    this.active = !!active;
+  }
+
+  GetLocalScale() {
+    return [this.localScaleX, this.localScaleY, this.localScaleZ];
+  }
+
+  GetLocalRotation() {
+    return [this.localRotationX, this.localRotationY, this.localRotationZ];
+  }
+
   SetImage(source, resourceId) {
     this.imageSource = source;
     if (typeof resourceId === 'object' && resourceId !== null && typeof resourceId.get === 'function') {
@@ -337,31 +361,57 @@ export class VirtualUIControl {
 
   // Calculate screen bounding box in Canvas coordinates (0,0 is bottom-left)
   getScreenBounds(canvasWidth, canvasHeight) {
-    let parentLeft = 0;
-    let parentBottom = 0;
     let parentWidth = canvasWidth;
     let parentHeight = canvasHeight;
+    let parentScaleX = 1;
+    let parentScaleY = 1;
+    let parentPivotScreenX = 0;
+    let parentPivotScreenY = 0;
+    let parentPivotX = 0;
+    let parentPivotY = 0;
+    let hasParent = false;
 
     if (this.parent && this.parent.getScreenBounds) {
       const pBounds = this.parent.getScreenBounds(canvasWidth, canvasHeight);
-      parentLeft = pBounds.left;
-      parentBottom = pBounds.bottom;
-      parentWidth = pBounds.width;
-      parentHeight = pBounds.height;
+      parentWidth = this.parent.sizeDeltaX || pBounds.width;
+      parentHeight = this.parent.sizeDeltaY || pBounds.height;
+      parentScaleX = pBounds.worldScaleX !== undefined ? pBounds.worldScaleX : 1;
+      parentScaleY = pBounds.worldScaleY !== undefined ? pBounds.worldScaleY : 1;
+      parentPivotScreenX = pBounds.pivotScreenX !== undefined ? pBounds.pivotScreenX : pBounds.centerX;
+      parentPivotScreenY = pBounds.pivotScreenY !== undefined ? pBounds.pivotScreenY : pBounds.centerY;
+      parentPivotX = this.parent.pivotX !== undefined ? this.parent.pivotX : 0.5;
+      parentPivotY = this.parent.pivotY !== undefined ? this.parent.pivotY : 0.5;
+      hasParent = true;
     }
 
-    // Anchor calculation
-    const anchorX = parentLeft + this.anchorMinX * parentWidth;
-    const anchorY = parentBottom + this.anchorMinY * parentHeight;
+    const selfScaleX = this.localScaleX !== undefined ? this.localScaleX : 1;
+    const selfScaleY = this.localScaleY !== undefined ? this.localScaleY : 1;
+    const worldScaleX = parentScaleX * selfScaleX;
+    const worldScaleY = parentScaleY * selfScaleY;
 
-    const sx = this.localScaleX !== undefined ? this.localScaleX : 1;
-    const sy = this.localScaleY !== undefined ? this.localScaleY : 1;
-    const width = this.sizeDeltaX * sx;
-    const height = this.sizeDeltaY * sy;
+    let pivotScreenX = 0;
+    let pivotScreenY = 0;
 
-    // Pivot offset
-    const left = anchorX + this.anchoredPositionX - this.pivotX * width;
-    const bottom = anchorY + this.anchoredPositionY - this.pivotY * height;
+    if (hasParent) {
+      // Local coordinate relative to parent's pivot before scaling:
+      const anchorRelX = (this.anchorMinX - parentPivotX) * parentWidth;
+      const anchorRelY = (this.anchorMinY - parentPivotY) * parentHeight;
+      const localX = anchorRelX + this.anchoredPositionX;
+      const localY = anchorRelY + this.anchoredPositionY;
+
+      // Scaled by parent's world scale around parent's pivot:
+      pivotScreenX = parentPivotScreenX + localX * parentScaleX;
+      pivotScreenY = parentPivotScreenY + localY * parentScaleY;
+    } else {
+      pivotScreenX = this.anchorMinX * canvasWidth + this.anchoredPositionX;
+      pivotScreenY = this.anchorMinY * canvasHeight + this.anchoredPositionY;
+    }
+
+    const width = this.sizeDeltaX * Math.abs(worldScaleX);
+    const height = this.sizeDeltaY * Math.abs(worldScaleY);
+
+    const left = pivotScreenX - this.pivotX * width;
+    const bottom = pivotScreenY - this.pivotY * height;
 
     return {
       left,
@@ -371,22 +421,27 @@ export class VirtualUIControl {
       right: left + width,
       top: bottom + height,
       centerX: left + width * 0.5,
-      centerY: bottom + height * 0.5
+      centerY: bottom + height * 0.5,
+      pivotScreenX,
+      pivotScreenY,
+      worldScaleX,
+      worldScaleY
     };
   }
 }
 
 // Miliastra Lua Runtime Runner
 export class MiliastraSimulator {
-  constructor(canvas, logCallback = null) {
+  constructor(canvas, logCallback = null, initialWidth = 960, initialHeight = 640) {
     this.canvas = canvas;
     this.ctx = canvas.getContext('2d');
     this.logCallback = logCallback || console.log;
 
-    this.width = 960;
-    this.height = 640;
+    this.width = Math.max(200, Math.min(3840, Math.round(Number(initialWidth) || 960)));
+    this.height = Math.max(200, Math.min(2160, Math.round(Number(initialHeight) || 640)));
     this.canvas.width = this.width;
     this.canvas.height = this.height;
+    this.canvas.style.aspectRatio = `${this.width} / ${this.height}`;
 
     this.cursorX = this.width / 2;
     this.cursorY = this.height / 2;
@@ -430,6 +485,31 @@ export class MiliastraSimulator {
   log(msg, type = 'info') {
     if (this.logCallback) {
       this.logCallback(msg, type);
+    }
+  }
+
+  setResolution(newWidth, newHeight) {
+    const w = Math.max(200, Math.min(3840, Math.round(Number(newWidth) || 960)));
+    const h = Math.max(200, Math.min(2160, Math.round(Number(newHeight) || 640)));
+    if (this.width === w && this.height === h) return;
+
+    this.width = w;
+    this.height = h;
+    this.canvas.width = this.width;
+    this.canvas.height = this.height;
+    this.canvas.style.aspectRatio = `${this.width} / ${this.height}`;
+
+    if (this.rootControl) {
+      this.rootControl.sizeDeltaX = this.width;
+      this.rootControl.sizeDeltaY = this.height;
+    }
+    if (this.scriptHost) {
+      this.scriptHost.sizeDeltaX = this.width;
+      this.scriptHost.sizeDeltaY = this.height;
+    }
+    this.log(`Viewport updated to ${this.width} × ${this.height}`, 'info');
+    if (this.isRunning) {
+      this.renderCanvas();
     }
   }
 
@@ -519,6 +599,18 @@ export class MiliastraSimulator {
     };
 
     const handleKeyDown = (e) => {
+      const targetTag = e.target && e.target.tagName;
+      if (targetTag === 'TEXTAREA' || targetTag === 'INPUT' || (e.target && e.target.isContentEditable)) {
+        return;
+      }
+      if (document.activeElement && (
+        document.activeElement.tagName === 'TEXTAREA' ||
+        document.activeElement.tagName === 'INPUT' ||
+        document.activeElement.isContentEditable
+      )) {
+        return;
+      }
+
       const keyMapDown = {
         'KeyW': [1, 36], // KeyboardMoveForwardKeyDown, KeyboardCraftspersonKey36Down (Up)
         'ArrowUp': [1, 36],
@@ -551,6 +643,18 @@ export class MiliastraSimulator {
     };
 
     const handleKeyUp = (e) => {
+      const targetTag = e.target && e.target.tagName;
+      if (targetTag === 'TEXTAREA' || targetTag === 'INPUT' || (e.target && e.target.isContentEditable)) {
+        return;
+      }
+      if (document.activeElement && (
+        document.activeElement.tagName === 'TEXTAREA' ||
+        document.activeElement.tagName === 'INPUT' ||
+        document.activeElement.isContentEditable
+      )) {
+        return;
+      }
+
       const keyMapUp = {
         'KeyW': [2, 136],
         'ArrowUp': [2, 136],
@@ -742,6 +846,9 @@ export class MiliastraSimulator {
       local js = require "js"
       local sim = js.global.__miliastra_sim
 
+      -- Polyfill math.pow for Lua 5.3+ environments (Fengari)
+      math.pow = math.pow or function(x, y) return x ^ y end
+
       -- Internal Lua Callback Registry
       _M_CursorCallbacks = {}
       _M_KeyCallbacks = {}
@@ -782,8 +889,26 @@ export class MiliastraSimulator {
       Color = {}
       Color.__index = Color
 
+      local ColorValueMeta = {
+        __tostring = function(self)
+          return string.format("Color(%d, %d, %d, %d)", math.floor(self.r or 255), math.floor(self.g or 255), math.floor(self.b or 255), math.floor(self.a or 255))
+        end,
+        __eq = function(a, b)
+          if type(a) ~= "table" or type(b) ~= "table" then return false end
+          return (a.r or 255) == (b.r or 255) and (a.g or 255) == (b.g or 255) and (a.b or 255) == (b.b or 255) and (a.a or 255) == (b.a or 255)
+        end
+      }
+
       function Color.FromRGBA(r, g, b, a)
-        return { r = r or 255, g = g or 255, b = b or 255, a = a or 255, __isColor = true }
+        local val = {
+          r = tonumber(r) or 255,
+          g = tonumber(g) or 255,
+          b = tonumber(b) or 255,
+          a = a ~= nil and tonumber(a) or 255,
+          __isColor = true
+        }
+        setmetatable(val, ColorValueMeta)
+        return val
       end
 
       function Color.FromRGB(r, g, b)
@@ -796,10 +921,97 @@ export class MiliastraSimulator {
         end
         return 255, 255, 255, 255
       end
+      Color.toRGBA = Color.ToRGBA
+      Color.fromRGB = Color.FromRGB
+      Color.fromRGBA = Color.FromRGBA
 
       setmetatable(Color, {
         __call = function(self, r, g, b, a)
           return Color.FromRGBA(r, g, b, a)
+        end
+      })
+
+      -- Miliastra Vector3 Library
+      Vector3 = {}
+      local Vector3Meta = {
+        __index = {
+          Magnitude = function(self)
+            return math.sqrt(self.x * self.x + self.y * self.y + self.z * self.z)
+          end,
+          magnitude = function(self)
+            return self:Magnitude()
+          end,
+          Normalize = function(self)
+            local mag = self:Magnitude()
+            if mag > 0.00001 then
+              return Vector3.new(self.x / mag, self.y / mag, self.z / mag)
+            end
+            return Vector3.new(0, 0, 0)
+          end,
+          normalize = function(self)
+            return self:Normalize()
+          end,
+          Dot = function(self, other)
+            return self.x * (other.x or 0) + self.y * (other.y or 0) + self.z * (other.z or 0)
+          end,
+          dot = function(self, other)
+            return self:Dot(other)
+          end,
+          Cross = function(self, other)
+            return Vector3.new(
+              self.y * (other.z or 0) - self.z * (other.y or 0),
+              self.z * (other.x or 0) - self.x * (other.z or 0),
+              self.x * (other.y or 0) - self.y * (other.x or 0)
+            )
+          end,
+          cross = function(self, other)
+            return self:Cross(other)
+          end,
+          ToString = function(self)
+            return string.format("Vector3(%.2f, %.2f, %.2f)", self.x, self.y, self.z)
+          end,
+          toString = function(self)
+            return self:ToString()
+          end
+        },
+        __add = function(a, b)
+          return Vector3.new((a.x or 0) + (b.x or 0), (a.y or 0) + (b.y or 0), (a.z or 0) + (b.z or 0))
+        end,
+        __sub = function(a, b)
+          return Vector3.new((a.x or 0) - (b.x or 0), (a.y or 0) - (b.y or 0), (a.z or 0) - (b.z or 0))
+        end,
+        __mul = function(a, b)
+          if type(b) == "number" then return Vector3.new(a.x * b, a.y * b, a.z * b) end
+          if type(a) == "number" then return Vector3.new(a * b.x, a * b.y, a * b.z) end
+          return Vector3.new(a.x * (b.x or 1), a.y * (b.y or 1), a.z * (b.z or 1))
+        end,
+        __div = function(a, b)
+          if type(b) == "number" then return Vector3.new(a.x / b, a.y / b, a.z / b) end
+          return Vector3.new(a.x / (b.x or 1), a.y / (b.y or 1), a.z / (b.z or 1))
+        end,
+        __unm = function(self)
+          return Vector3.new(-self.x, -self.y, -self.z)
+        end,
+        __tostring = function(self)
+          return string.format("Vector3(%.2f, %.2f, %.2f)", self.x, self.y, self.z)
+        end
+      }
+
+      function Vector3.new(x, y, z)
+        local v = { x = tonumber(x) or 0, y = tonumber(y) or 0, z = tonumber(z) or 0 }
+        setmetatable(v, Vector3Meta)
+        return v
+      end
+
+      Vector3.zero = Vector3.new(0, 0, 0)
+      Vector3.one = Vector3.new(1, 1, 1)
+      Vector3.up = Vector3.new(0, 1, 0)
+      Vector3.right = Vector3.new(1, 0, 0)
+      Vector3.forward = Vector3.new(0, 0, 1)
+
+      setmetatable(Vector3, {
+        __call = function(self, x, y, z)
+          return Vector3.new(x, y, z)
         end
       })
 
@@ -1079,6 +1291,12 @@ export class MiliastraSimulator {
                 jsCtrl:SetAnchoredPosition(args[1] or 0, args[2] or 0)
               elseif k == "SetSizeDelta" then
                 jsCtrl:SetSizeDelta(args[1] or 0, args[2] or 0)
+              elseif k == "SetLocalScale" then
+                jsCtrl:SetLocalScale(args[1], args[2], args[3])
+              elseif k == "SetLocalRotation" then
+                jsCtrl:SetLocalRotation(args[1], args[2], args[3])
+              elseif k == "SetActive" then
+                jsCtrl:SetActive(args[1])
               elseif k == "SetImage" then
                 jsCtrl:SetImage(args[1], args[2])
               elseif k == "SetVisible" then
@@ -1180,12 +1398,12 @@ export class MiliastraSimulator {
             elseif k == "anchoredPositionY" then jsCtrl.anchoredPositionY = tonumber(v) or 0
             elseif k == "sizeDeltaX" then jsCtrl.sizeDeltaX = tonumber(v) or 0
             elseif k == "sizeDeltaY" then jsCtrl.sizeDeltaY = tonumber(v) or 0
-            elseif k == "localScaleX" then jsCtrl.localScaleX = tonumber(v) or 1
-            elseif k == "localScaleY" then jsCtrl.localScaleY = tonumber(v) or 1
-            elseif k == "localScaleZ" then jsCtrl.localScaleZ = tonumber(v) or 1
-            elseif k == "localRotationX" then jsCtrl.localRotationX = tonumber(v) or 0
-            elseif k == "localRotationY" then jsCtrl.localRotationY = tonumber(v) or 0
-            elseif k == "localRotationZ" then jsCtrl.localRotationZ = tonumber(v) or 0
+            elseif k == "localScaleX" then jsCtrl.localScaleX = tonumber(v) ~= nil and tonumber(v) or 1
+            elseif k == "localScaleY" then jsCtrl.localScaleY = tonumber(v) ~= nil and tonumber(v) or 1
+            elseif k == "localScaleZ" then jsCtrl.localScaleZ = tonumber(v) ~= nil and tonumber(v) or 1
+            elseif k == "localRotationX" then jsCtrl.localRotationX = tonumber(v) ~= nil and tonumber(v) or 0
+            elseif k == "localRotationY" then jsCtrl.localRotationY = tonumber(v) ~= nil and tonumber(v) or 0
+            elseif k == "localRotationZ" then jsCtrl.localRotationZ = tonumber(v) ~= nil and tonumber(v) or 0
             elseif k == "anchorMinX" then jsCtrl.anchorMinX = tonumber(v) or 0
             elseif k == "anchorMinY" then jsCtrl.anchorMinY = tonumber(v) or 0
             elseif k == "anchorMaxX" then jsCtrl.anchorMaxX = tonumber(v) or 0
@@ -1222,54 +1440,54 @@ export class MiliastraSimulator {
         if easeType == 1 then return t * t end
         if easeType == 2 then return 1 - (1 - t) * (1 - t) end
         if easeType == 3 then
-          return t < 0.5 and 2 * t * t or 1 - math.pow(-2 * t + 2, 2) / 2
+          return t < 0.5 and 2 * t * t or 1 - ((-2 * t + 2) ^ 2) / 2
         end
         if easeType == 4 then return t * t * t end
-        if easeType == 5 then return 1 - math.pow(1 - t, 3) end
+        if easeType == 5 then return 1 - ((1 - t) ^ 3) end
         if easeType == 6 then
-          return t < 0.5 and 4 * t * t * t or 1 - math.pow(-2 * t + 2, 3) / 2
+          return t < 0.5 and 4 * t * t * t or 1 - ((-2 * t + 2) ^ 3) / 2
         end
         if easeType == 7 then return t * t * t * t end
-        if easeType == 8 then return 1 - math.pow(1 - t, 4) end
+        if easeType == 8 then return 1 - ((1 - t) ^ 4) end
         if easeType == 9 then
-          return t < 0.5 and 8 * t * t * t * t or 1 - math.pow(-2 * t + 2, 4) / 2
+          return t < 0.5 and 8 * t * t * t * t or 1 - ((-2 * t + 2) ^ 4) / 2
         end
         if easeType == 10 then return t * t * t * t * t end
-        if easeType == 11 then return 1 - math.pow(1 - t, 5) end
+        if easeType == 11 then return 1 - ((1 - t) ^ 5) end
         if easeType == 12 then
-          return t < 0.5 and 16 * t * t * t * t * t or 1 - math.pow(-2 * t + 2, 5) / 2
+          return t < 0.5 and 16 * (t ^ 5) or 1 - ((-2 * t + 2) ^ 5) / 2
         end
         if easeType == 13 then return 1 - math.cos((t * math.pi) / 2) end
         if easeType == 14 then return math.sin((t * math.pi) / 2) end
         if easeType == 15 then return -(math.cos(math.pi * t) - 1) / 2 end
-        if easeType == 16 then return math.pow(2, 10 * t - 10) end
-        if easeType == 17 then return 1 - math.pow(2, -10 * t) end
+        if easeType == 16 then return 2 ^ (10 * t - 10) end
+        if easeType == 17 then return 1 - (2 ^ (-10 * t)) end
         if easeType == 18 then
-          return t < 0.5 and math.pow(2, 20 * t - 10) / 2 or (2 - math.pow(2, -20 * t + 10)) / 2
+          return t < 0.5 and (2 ^ (20 * t - 10)) / 2 or (2 - (2 ^ (-20 * t + 10))) / 2
         end
-        if easeType == 19 then return 1 - math.sqrt(1 - math.pow(t, 2)) end
-        if easeType == 20 then return math.sqrt(1 - math.pow(t - 1, 2)) end
+        if easeType == 19 then return 1 - math.sqrt(math.max(0, 1 - (t ^ 2))) end
+        if easeType == 20 then return math.sqrt(math.max(0, 1 - ((t - 1) ^ 2))) end
         if easeType == 21 then
-          return t < 0.5 and (1 - math.sqrt(1 - math.pow(2 * t, 2))) / 2 or (math.sqrt(1 - math.pow(-2 * t + 2, 2)) + 1) / 2
+          return t < 0.5 and (1 - math.sqrt(math.max(0, 1 - ((2 * t) ^ 2)))) / 2 or (math.sqrt(math.max(0, 1 - ((-2 * t + 2) ^ 2))) + 1) / 2
         end
         local c4 = (2 * math.pi) / 3
         local c5 = (2 * math.pi) / 4.5
         if easeType == 22 then
-          return -math.pow(2, 10 * t - 10) * math.sin((t * 10 - 10.75) * c4)
+          return -(2 ^ (10 * t - 10)) * math.sin((t * 10 - 10.75) * c4)
         end
         if easeType == 23 then
-          return math.pow(2, -10 * t) * math.sin((t * 10 - 0.75) * c4) + 1
+          return (2 ^ (-10 * t)) * math.sin((t * 10 - 0.75) * c4) + 1
         end
         if easeType == 24 then
-          return t < 0.5 and -(math.pow(2, 20 * t - 10) * math.sin((20 * t - 11.125) * c5)) / 2 or (math.pow(2, -20 * t + 10) * math.sin((20 * t - 11.125) * c5)) / 2 + 1
+          return t < 0.5 and -((2 ^ (20 * t - 10)) * math.sin((20 * t - 11.125) * c5)) / 2 or ((2 ^ (-20 * t + 10)) * math.sin((20 * t - 11.125) * c5)) / 2 + 1
         end
         local c1 = 1.70158
         local c3 = c1 + 1
         local c2 = c1 * 1.525
         if easeType == 25 then return c3 * t * t * t - c1 * t * t end
-        if easeType == 26 then return 1 + c3 * math.pow(t - 1, 3) + c1 * math.pow(t - 1, 2) end
+        if easeType == 26 then return 1 + c3 * ((t - 1) ^ 3) + c1 * ((t - 1) ^ 2) end
         if easeType == 27 then
-          return t < 0.5 and (math.pow(2 * t, 2) * ((c2 + 1) * 2 * t - c2)) / 2 or (math.pow(2 * t - 2, 2) * ((c2 + 1) * (t * 2 - 2) + c2) + 2) / 2
+          return t < 0.5 and (((2 * t) ^ 2) * ((c2 + 1) * 2 * t - c2)) / 2 or (((2 * t - 2) ^ 2) * ((c2 + 1) * (t * 2 - 2) + c2) + 2) / 2
         end
         local function outBounce(x)
           local n1 = 7.5625
@@ -1694,16 +1912,48 @@ export class MiliastraSimulator {
       end
 
       function _UpdateAllTweens(dt)
+        local tweenList = {}
         for _, tw in pairs(_ActiveTweens) do
-          if tw and tw.Update then
+          table.insert(tweenList, tw)
+        end
+        for i = 1, #tweenList do
+          local tw = tweenList[i]
+          if tw and tw.Update and not tw.isKilled then
             tw:Update(dt)
           end
         end
+
+        local seqList = {}
         for _, seq in pairs(_ActiveSequences) do
-          if seq and seq.Update then
+          table.insert(seqList, seq)
+        end
+        for i = 1, #seqList do
+          local seq = seqList[i]
+          if seq and seq.Update and not seq.isKilled then
             seq:Update(dt)
           end
         end
+      end
+
+      -- Math Extensions
+      math.isinf = function(n)
+        return n == math.huge or n == -math.huge
+      end
+      math.isnan = function(n)
+        return n ~= n
+      end
+
+      -- Runtime typeof inspector
+      function typeof(val)
+        local t = type(val)
+        if t == "table" then
+          if val.__isColor then return "ColorValue" end
+          if val._raw then return "ClientUIControl" end
+          if val.id and val.ApplyProgress then return "Tween" end
+          if val.id and val.items then return "TweenSequence" end
+          return "table"
+        end
+        return t
       end
 
       -- 6. Global Game Engine Object
@@ -1720,6 +1970,14 @@ export class MiliastraSimulator {
           local pRaw = parent and parent._raw or sim.rootControl
           local ctrl = sim:createControl(templateId, pRaw)
           return wrapControl(ctrl)
+        end,
+
+        DestroyClientUIControl = function(control)
+          if control and control._raw then
+            control._raw:Destroy()
+          elseif control and control.Destroy then
+            control:Destroy()
+          end
         end,
 
         GetClientUIControl = function(id)
@@ -1772,19 +2030,65 @@ export class MiliastraSimulator {
         SetControllerFocus = function(control)
         end,
 
+        GetControllerFocus = function()
+          return nil
+        end,
+
+        GetControllerLeftStickAxis = function()
+          return 0, 0
+        end,
+
+        GetControllerRightStickAxis = function()
+          return 0, 0
+        end,
+
+        GetDevice = function()
+          return Enum.Device.KeyboardAndMouse
+        end,
+
+        GetLanguageType = function()
+          return Enum.LanguageType.LanguageEng
+        end,
+
+        GetStageMode = function()
+          return 1
+        end,
+
+        GetText = function(textMappingId)
+          return tostring(textMappingId or "")
+        end,
+
+        GetGlobalCustomVariableValue = function(entity, varName)
+          return nil
+        end,
+
         PrintClientUITree = function()
           sim:log("Client UI Hierarchy tree dumped", "info")
         end,
 
         ServerSignal = function(name)
+          local params = {}
           return {
             Connect = function(self, fn) end,
             Fire = function(self, ...) end,
-            AddBool = function(self, v) end,
-            AddInt = function(self, v) end,
-            AddFloat = function(self, v) end,
-            AddString = function(self, v) end,
-            AddVector3 = function(self, v) end
+            SendSignal = function(self)
+              sim:log("[ServerSignal: " .. tostring(name) .. "] Dispatched with " .. tostring(#params) .. " params", "info")
+            end,
+            AddBool = function(self, v) table.insert(params, not not v) end,
+            AddBoolList = function(self, list) for _, v in ipairs(list or {}) do table.insert(params, not not v) end end,
+            AddInt = function(self, v) table.insert(params, math.floor(tonumber(v) or 0)) end,
+            AddIntList = function(self, list) for _, v in ipairs(list or {}) do table.insert(params, math.floor(tonumber(v) or 0)) end end,
+            AddFloat = function(self, v) table.insert(params, tonumber(v) or 0) end,
+            AddFloatList = function(self, list) for _, v in ipairs(list or {}) do table.insert(params, tonumber(v) or 0) end end,
+            AddString = function(self, v) table.insert(params, tostring(v or "")) end,
+            AddStringList = function(self, list) for _, v in ipairs(list or {}) do table.insert(params, tostring(v or "")) end end,
+            AddVector3 = function(self, v) table.insert(params, v) end,
+            AddVector3List = function(self, list) for _, v in ipairs(list or {}) do table.insert(params, v) end end,
+            AddConfigId = function(self, v) table.insert(params, math.floor(tonumber(v) or 0)) end,
+            AddEntity = function(self, v) table.insert(params, math.floor(tonumber(v) or 0)) end,
+            AddGuid = function(self, v) table.insert(params, math.floor(tonumber(v) or 0)) end,
+            AddPrefabId = function(self, v) table.insert(params, math.floor(tonumber(v) or 0)) end,
+            AddParam = function(self, pType, val) table.insert(params, val) end
           }
         end
       }
@@ -1827,7 +2131,40 @@ export class MiliastraSimulator {
   }
 
   createControl(templateId, parent) {
-    const ctrl = new VirtualUIControl(templateId, parent);
+    const nextId = Math.floor(1000000000 + Math.random() * 900000000);
+    const ctrl = new VirtualUIControl(nextId, parent);
+    ctrl.templateId = Number(templateId) || 1073741850;
+
+    if (ctrl.templateId === 1073741850) { // Image_Instance ID
+      ctrl.name = 'ImageControl';
+      ctrl.imageColor = { r: 255, g: 255, b: 255, a: 255 };
+      ctrl.resourceId = 100001; // Default rectangle
+      ctrl.sizeDeltaX = 100;
+      ctrl.sizeDeltaY = 100;
+    } else if (ctrl.templateId === 1073741849) { // TextBox_Instance ID
+      ctrl.name = 'TextBoxControl';
+      ctrl.imageColor = { r: 0, g: 0, b: 0, a: 0 };
+      ctrl.fontColor = { r: 255, g: 255, b: 255, a: 255 };
+      ctrl.fontSize = 16;
+      ctrl.sizeDeltaX = 200;
+      ctrl.sizeDeltaY = 50;
+    } else if (ctrl.templateId === 1073741851) { // PresetButton_Instance ID
+      ctrl.name = 'PresetButtonControl';
+      ctrl.imageColor = { r: 65, g: 52, b: 38, a: 230 };
+      ctrl.sizeDeltaX = 160;
+      ctrl.sizeDeltaY = 48;
+      ctrl.interactable = true;
+      ctrl.raycastTarget = true;
+    } else if (ctrl.templateId === 1073741852) { // ContainerControl ID
+      ctrl.name = 'ContainerControl';
+      ctrl.imageColor = { r: 0, g: 0, b: 0, a: 0 };
+    } else if (ctrl.templateId === 1073741856) { // CursorEventArea ID
+      ctrl.name = 'CursorEventAreaControl';
+      ctrl.imageColor = { r: 0, g: 0, b: 0, a: 0 };
+      ctrl.interactable = true;
+      ctrl.raycastTarget = true;
+    }
+
     this.controlsById.set(ctrl.id, ctrl);
     return ctrl;
   }
@@ -1986,17 +2323,22 @@ export class MiliastraSimulator {
       const shape = ASSET_SHAPES[ctrl.resourceId] || 'rectangle';
 
       if (shape === 'circle') {
-        const radius = Math.min(bounds.width, bounds.height) / 2;
+        const rx = Math.max(0.5, bounds.width / 2);
+        const ry = Math.max(0.5, bounds.height / 2);
         const cx = bounds.left + bounds.width / 2;
         const cy = canvasY + bounds.height / 2;
 
         ctx.beginPath();
-        ctx.arc(cx, cy, Math.max(0.5, radius), 0, Math.PI * 2);
+        if (typeof ctx.ellipse === 'function') {
+          ctx.ellipse(cx, cy, rx, ry, 0, 0, Math.PI * 2);
+        } else {
+          ctx.arc(cx, cy, Math.min(rx, ry), 0, Math.PI * 2);
+        }
 
         if (ctrl.enableSoftEdge) {
           if (imgCol.r === 0 && imgCol.g === 0 && imgCol.b === 0) {
             // Shadow soft edge gradient
-            const grad = ctx.createRadialGradient(cx, cy, Math.max(0.1, radius * 0.1), cx, cy, radius);
+            const grad = ctx.createRadialGradient(cx, cy, Math.max(0.1, Math.min(rx, ry) * 0.1), cx, cy, Math.max(rx, ry));
             grad.addColorStop(0, `rgba(0, 0, 0, ${imgCol.a / 255})`);
             grad.addColorStop(0.7, `rgba(0, 0, 0, ${imgCol.a * 0.5 / 255})`);
             grad.addColorStop(1, 'rgba(0, 0, 0, 0)');
@@ -2004,7 +2346,8 @@ export class MiliastraSimulator {
             ctx.fill();
           } else {
             // 3D Ball / Spherical highlight shading for billiard balls
-            const grad = ctx.createRadialGradient(cx - radius * 0.32, cy - radius * 0.32, Math.max(0.1, radius * 0.05), cx, cy, radius);
+            const avgR = Math.min(rx, ry);
+            const grad = ctx.createRadialGradient(cx - rx * 0.32, cy - ry * 0.32, Math.max(0.1, avgR * 0.05), cx, cy, Math.max(rx, ry));
             const hlR = Math.min(255, Math.round(imgCol.r + 70));
             const hlG = Math.min(255, Math.round(imgCol.g + 70));
             const hlB = Math.min(255, Math.round(imgCol.b + 70));
@@ -2021,14 +2364,22 @@ export class MiliastraSimulator {
           ctx.fill();
         }
       } else if (shape === 'hollow_circle') {
-        const radius = Math.min(bounds.width, bounds.height) / 2;
+        const rx = Math.max(0.5, bounds.width / 2);
+        const ry = Math.max(0.5, bounds.height / 2);
         const cx = bounds.left + bounds.width / 2;
         const cy = canvasY + bounds.height / 2;
-        const innerRadius = radius * 0.65;
+        const innerRx = rx * 0.65;
+        const innerRy = ry * 0.65;
 
         ctx.beginPath();
-        ctx.arc(cx, cy, Math.max(0.5, radius), 0, Math.PI * 2, false);
-        ctx.arc(cx, cy, Math.max(0.2, innerRadius), 0, Math.PI * 2, true);
+        if (typeof ctx.ellipse === 'function') {
+          ctx.ellipse(cx, cy, rx, ry, 0, 0, Math.PI * 2, false);
+          ctx.ellipse(cx, cy, innerRx, innerRy, 0, 0, Math.PI * 2, true);
+        } else {
+          const radius = Math.min(rx, ry);
+          ctx.arc(cx, cy, radius, 0, Math.PI * 2, false);
+          ctx.arc(cx, cy, radius * 0.65, 0, Math.PI * 2, true);
+        }
         ctx.closePath();
         ctx.fill();
       } else if (shape === 'triangle') {
@@ -2141,6 +2492,26 @@ export class MiliastraSimulator {
 
     this.controlsById.set(1, this.rootControl);
     this.controlsById.set(2, this.scriptHost);
+  }
+
+  setSize(newWidth, newHeight) {
+    const w = Math.max(200, Math.min(3840, Math.round(Number(newWidth) || 960)));
+    const h = Math.max(200, Math.min(2160, Math.round(Number(newHeight) || 640)));
+    this.width = w;
+    this.height = h;
+    this.canvas.width = w;
+    this.canvas.height = h;
+    this.canvas.style.aspectRatio = `${w} / ${h}`;
+
+    if (this.rootControl) {
+      this.rootControl.sizeDeltaX = w;
+      this.rootControl.sizeDeltaY = h;
+    }
+    if (this.scriptHost) {
+      this.scriptHost.sizeDeltaX = w;
+      this.scriptHost.sizeDeltaY = h;
+    }
+    this.log(`Viewport resolution updated to: ${w} × ${h}`, 'info');
   }
 
   pause() {
