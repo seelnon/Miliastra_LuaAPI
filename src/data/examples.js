@@ -4,38 +4,6 @@
 // Compatible with static site hosting (GitHub Pages, Netlify, Vercel, S3, Nginx)
 // using new URL(...) and fetch() with bundling and in-memory caching.
 // ============================================================================
-
-// Vite raw glob import loads every actual .lua file as static strings during build/dev
-const rawLuaModulesRoot = import.meta.glob('/lua_examples/*.lua', {
-  query: '?raw',
-  import: 'default',
-  eager: true
-});
-
-const rawLuaModulesRel = import.meta.glob('../../lua_examples/*.lua', {
-  query: '?raw',
-  import: 'default',
-  eager: true
-});
-
-const bundledLuaFiles = { ...rawLuaModulesRoot, ...rawLuaModulesRel };
-
-// In-memory cache for fetched and parsed .lua files
-const luaCache = new Map();
-
-/**
- * Resolves static bundle string fallback if present
- */
-function getBundledLuaSource(filename) {
-  const cleanName = filename.replace(/^(\/|lua_examples\/)/, '');
-  for (const [key, content] of Object.entries(bundledLuaFiles)) {
-    if (key.endsWith(`/${cleanName}`) || key.endsWith(cleanName)) {
-      return typeof content === 'string' ? content.replace(/^\uFEFF/, '') : '';
-    }
-  }
-  return '';
-}
-
 /**
  * Fetches a raw .lua file from the static web server using new URL() and fetch(),
  * matching the canonical brutalist Kangxi static architecture.
