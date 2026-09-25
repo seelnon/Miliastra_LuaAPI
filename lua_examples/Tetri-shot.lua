@@ -607,7 +607,6 @@ local function setupButton(button, x, y)
         button:SetPivot(0, 0)
         button:SetAnchoredPosition(x, y)
         button:SetSizeDelta(52, 52)
-        button.imageColor = Color.FromRGBA(36, 42, 56, 235)
         button.interactable = true
         button.raycastTarget = true
 end
@@ -621,7 +620,6 @@ local function setupButtonLabel(control, text, x, y)
         control.text = text
         control.fontSize = 14
         control.fontColor = Color.FromRGBA(255, 255, 255, 255)
-        control.bgColor = Color.FromRGBA(0, 0, 0, 0)
 end
 
 -- The cursor position is converted to board coordinates, and the hand position is updated accordingly. The hand position is then clamped to ensure it stays within the bounds of the board.
