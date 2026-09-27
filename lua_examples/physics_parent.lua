@@ -35,6 +35,10 @@ local EXPLOSION_RADIUS = 240
 local EXPLOSION_RADIUS_SQ = EXPLOSION_RADIUS * EXPLOSION_RADIUS
 local EXPLOSION_IMPULSE = 720
 
+local DESIGN_WIDTH = 960
+local DESIGN_HEIGHT = 640
+local rootScale = 1.0
+
 local rootControl = nil
 local inputControl = nil
 local statusLabel = nil
@@ -134,7 +138,7 @@ local function ResetRuntimeState()
 end
 
 local function SetupGeometry()
-	local screenWidth, screenHeight = game.GetUICanvasSize()
+	local screenWidth, screenHeight = DESIGN_WIDTH, DESIGN_HEIGHT
 	tableWidth = math.min(screenWidth * 0.72, screenHeight * 0.66)
 	tableHeight = tableWidth * 0.52
 	tableLeft = (screenWidth - tableWidth) * 0.5
@@ -167,12 +171,16 @@ local function SetupGeometry()
 end
 
 local function ConfigureRootCanvas()
-	local screenWidth, screenHeight = game.GetUICanvasSize()
-	rootControl:SetAnchorMin(0, 0)
-	rootControl:SetAnchorMax(0, 0)
-	rootControl:SetPivot(0, 0)
+	if not rootControl then return end
+	local vw, vh = game.GetUICanvasSize()
+	rootScale = math.min(vw / DESIGN_WIDTH, vh / DESIGN_HEIGHT)
+	rootScale = math.max(0.35, math.min(rootScale, 2.5))
+	rootControl:SetAnchorMin(0.5, 0.5)
+	rootControl:SetAnchorMax(0.5, 0.5)
+	rootControl:SetPivot(0.5, 0.5)
 	rootControl:SetAnchoredPosition(0, 0)
-	rootControl:SetSizeDelta(screenWidth, screenHeight)
+	rootControl:SetSizeDelta(DESIGN_WIDTH, DESIGN_HEIGHT)
+	rootControl:SetLocalScale(rootScale, rootScale, 1)
 end
 
 local function MakeTableVisuals()
@@ -636,12 +644,15 @@ end
 local function CreateInputLayer()
 	inputControl = game.InstantiateClientUIControl(BUTTON_TEMPLATE or 4, rootControl)
 	if not RememberControl(inputControl) then return false end
-	local screenWidth, screenHeight = game.GetUICanvasSize()
-	ConfigureControl(inputControl, screenWidth * 0.5, screenHeight * 0.5, screenWidth, screenHeight, "PHY_InputLayer")
+	ConfigureControl(inputControl, DESIGN_WIDTH * 0.5, DESIGN_HEIGHT * 0.5, DESIGN_WIDTH, DESIGN_HEIGHT, "PHY_InputLayer")
 	inputControl.interactable = true
 	inputControl.raycastTarget = true
 	inputControl:AddCursorEventListener(Enum.CursorEventType.CursorClick, function(eventData)
-		local x, y = eventData:GetUIPos()
+		ConfigureRootCanvas()
+		local rawX, rawY = eventData:GetUIPos()
+		local vw, vh = game.GetUICanvasSize()
+		local x = DESIGN_WIDTH * 0.5 + (rawX - vw * 0.5) / rootScale
+		local y = DESIGN_HEIGHT * 0.5 + (rawY - vh * 0.5) / rootScale
 		if x >= tableLeft and x <= tableRight and y >= tableBottom and y <= tableTop then
 			ApplyExplosion(x, y)
 		end
@@ -690,6 +701,7 @@ function OnStart()
 end
 
 function OnUpdate(deltaTime)
+	ConfigureRootCanvas()
 	accumulator = accumulator + math.min(deltaTime, 0.1)
 	local steps = 0
 	while accumulator >= PHYSICS_STEP and steps < MAX_STEPS_PER_FRAME do

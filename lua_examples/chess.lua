@@ -18,6 +18,10 @@ local BOT_THINK_DELAY = 0.08        -- Near-instant bot response after White's m
 local BOT_RANDOM_MOVE_CHANCE = 0.35 -- ~250 ELO blend of tactical search + novice randomness
 local BOT_EVAL_NOISE = 140          -- Centipawn jitter for 250 ELO personality
 
+local DESIGN_WIDTH = 960
+local DESIGN_HEIGHT = 640
+local rootScale = 1.0
+
 local boardControl = nil
 local boardInput = nil
 local resetBtn = nil
@@ -535,8 +539,21 @@ local function SetText(control, x, y, width, height, value, size, color, name)
 	control.verticalAlignment = Enum.TextVerticalAlignment.Middle
 end
 
+local function RefreshRootScale()
+	if not boardControl then return end
+	local vw, vh = game.GetUICanvasSize()
+	rootScale = math.min(vw / DESIGN_WIDTH, vh / DESIGN_HEIGHT)
+	rootScale = math.max(0.35, math.min(rootScale, 2.5))
+	boardControl:SetAnchorMin(0.5, 0.5)
+	boardControl:SetAnchorMax(0.5, 0.5)
+	boardControl:SetPivot(0.5, 0.5)
+	boardControl:SetAnchoredPosition(0, 0)
+	boardControl:SetSizeDelta(DESIGN_WIDTH, DESIGN_HEIGHT)
+	boardControl:SetLocalScale(rootScale, rootScale, 1)
+end
+
 local function ConfigureBoardGeometry()
-	local screenWidth, screenHeight = game.GetUICanvasSize()
+	local screenWidth, screenHeight = DESIGN_WIDTH, DESIGN_HEIGHT
 	boardSize = math.min(screenWidth * 0.68, screenHeight * 0.72)
 	squareSize = boardSize / 8
 	boardLeft = (screenWidth - boardSize) * 0.5
@@ -544,7 +561,11 @@ local function ConfigureBoardGeometry()
 end
 
 local function GetBoardSquare(eventData)
-	local x, y = eventData:GetUIPos()
+	RefreshRootScale()
+	local rawX, rawY = eventData:GetUIPos()
+	local vw, vh = game.GetUICanvasSize()
+	local x = DESIGN_WIDTH * 0.5 + (rawX - vw * 0.5) / rootScale
+	local y = DESIGN_HEIGHT * 0.5 + (rawY - vh * 0.5) / rootScale
 	local file = math.floor((x - boardLeft) / squareSize) + 1
 	local rank = math.floor((y - boardBottom) / squareSize) + 1
 	if not IsInside(file, rank) then
@@ -762,10 +783,8 @@ local function ExecuteMove(move)
 
 	if not gameOver and currentTurn == "black" then
 		botTimer = BOT_THINK_DELAY
-		script:EnableUpdate(true)
-	else
-		script:EnableUpdate(false)
 	end
+	script:EnableUpdate(true)
 end
 
 local function ResetGame()
@@ -803,7 +822,7 @@ local function ResetGame()
 	enPassantTarget = nil
 	lastMove = nil
 	botTimer = 0
-	script:EnableUpdate(false)
+	script:EnableUpdate(true)
 
 	EvaluateGameState(nil)
 	RenderSquaresAndPieces()
@@ -855,7 +874,7 @@ local function HandleBoardClick(eventData)
 end
 
 local function CreateBoardVisuals()
-	local screenWidth, screenHeight = game.GetUICanvasSize()
+	local screenWidth = DESIGN_WIDTH
 
 	-- Board outer frame
 	local framePad = math.max(10, squareSize * 0.34)
@@ -964,12 +983,10 @@ end
 
 function OnStart()
 	boardControl = script.object
-	local screenWidth, screenHeight = game.GetUICanvasSize()
-	boardControl:SetAnchorMin(0, 0)
-	boardControl:SetAnchorMax(0, 0)
-	boardControl:SetPivot(0, 0)
-	boardControl:SetAnchoredPosition(0, 0)
-	boardControl:SetSizeDelta(screenWidth, screenHeight)
+	RefreshRootScale()
+    boardControl.showCursor = true
+	boardControl.disableKeyEventPassthrough = true
+	boardControl.disableCursorEventPassthrough = true
 
 	ConfigureBoardGeometry()
 	CreateBoardVisuals()
@@ -989,12 +1006,13 @@ function OnStart()
 	boardInput:AddCursorEventListener(Enum.CursorEventType.CursorClick, HandleBoardClick)
 
 	ResetGame()
-	print("[Chess] Ready: White vs 250 ELO Bot (Castling, En Passant, Move Dots, Check/Checkmate)")
+	script:EnableUpdate(true)
+	print("[Chess] Ready: Centered Fit-to-View Container, White vs 250 ELO Bot")
 end
 
 function OnUpdate(deltaTime)
+	RefreshRootScale()
 	if gameOver or currentTurn ~= "black" then
-		script:EnableUpdate(false)
 		return
 	end
 
@@ -1006,7 +1024,6 @@ function OnUpdate(deltaTime)
 		else
 			EvaluateGameState(nil)
 			RenderSquaresAndPieces()
-			script:EnableUpdate(false)
 		end
 	end
 end

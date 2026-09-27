@@ -20,6 +20,9 @@
 local BOARD_WIDTH = 10
 local BOARD_HEIGHT = 20
 local CELL_SIZE = 28
+local DESIGN_WIDTH = 640
+local DESIGN_HEIGHT = 720
+local rootScale = 1.0
 local FALL_INTERVAL = 0.42
 local PANIC_INTERVAL = 5
 local MIN_PANIC_INTERVAL = 1.2
@@ -43,7 +46,7 @@ local score = 0
 local lines = 0
 local level = 0
 local gameOver = false
-local cursorInside = false
+local cursorInside = true
 local scoreText = nil
 local statusText = nil
 local tetrisText = nil
@@ -626,15 +629,29 @@ end
 -- The cursor position is converted to board coordinates, and the hand position is updated accordingly. The hand position is then clamped to ensure it stays within the bounds of the board.
 -- This function is called whenever the cursor moves.
 
+local function RefreshRootScale()
+        if not container then return end
+        local vw, vh = game.GetUICanvasSize()
+        rootScale = math.min(vw / DESIGN_WIDTH, vh / DESIGN_HEIGHT)
+        rootScale = math.max(0.35, math.min(rootScale, 2.5))
+        container:SetAnchorMin(0.5, 0.5)
+        container:SetAnchorMax(0.5, 0.5)
+        container:SetPivot(0.5, 0.5)
+        container:SetSizeDelta(BOARD_WIDTH * CELL_SIZE, BOARD_HEIGHT * CELL_SIZE)
+        container:SetLocalScale(rootScale, rootScale, 1)
+end
+
 local function updateAim(cursorX, cursorY)
         if not currentPiece then
                 return
         end
+        RefreshRootScale()
         local viewportWidth, viewportHeight = game.GetUICanvasSize()
-        local originX = (viewportWidth - BOARD_WIDTH * CELL_SIZE) / 2
-        local originY = (viewportHeight - BOARD_HEIGHT * CELL_SIZE) / 2
-        local cursorCellX = (cursorX - originX) / CELL_SIZE
-        local cursorCellFromBottom = (cursorY - originY) / CELL_SIZE
+        local scaledCell = CELL_SIZE * rootScale
+        local originX = viewportWidth * 0.5 - (BOARD_WIDTH * scaledCell) * 0.5
+        local originY = viewportHeight * 0.5 - (BOARD_HEIGHT * scaledCell) * 0.5
+        local cursorCellX = (cursorX - originX) / scaledCell
+        local cursorCellFromBottom = (cursorY - originY) / scaledCell
         local pieceWidth = #currentPiece.matrix[1]
         local pieceHeight = #currentPiece.matrix
         local pieceCenterX = pieceWidth / 2
@@ -705,19 +722,15 @@ function OnStart()
         container.disableCursorEventPassthrough = true
         container.disableKeyEventPassthrough = true
         container.showCursor = true
-        container:SetAnchorMin(0.5, 0.5)
-        container:SetAnchorMax(0.5, 0.5)
-        container:SetPivot(0.5, 0.5)
         container:SetAnchoredPosition(0, 0)
-        container:SetSizeDelta(BOARD_WIDTH * CELL_SIZE, BOARD_HEIGHT * CELL_SIZE)
+        RefreshRootScale()
 
-        local viewportWidth, viewportHeight = game.GetUICanvasSize()
         globalClickArea = game.InstantiateClientUIControl(1073741856, container)
         globalClickArea:SetAnchorMin(0.5, 0.5)
         globalClickArea:SetAnchorMax(0.5, 0.5)
         globalClickArea:SetPivot(0.5, 0.5)
         globalClickArea:SetAnchoredPosition(0, 0)
-        globalClickArea:SetSizeDelta(viewportWidth, viewportHeight)
+        globalClickArea:SetSizeDelta(3840, 2160)
         globalClickArea.raycastTarget = true
         globalClickArea:SetAsFirstSibling()
         globalClickArea:AddCursorEventListener(Enum.CursorEventType.CursorClick, function(eventData)
@@ -867,7 +880,7 @@ function OnStart()
                 updateAim(cursorX, cursorY)
         end)
         cursorArea:AddCursorEventListener(Enum.CursorEventType.CursorExit, function()
-                cursorInside = false
+                cursorInside = true
         end)
         cursorArea:AddCursorEventListener(Enum.CursorEventType.CursorClick, function(eventData)
                 local cursorX, cursorY = eventData:GetUIPos()
@@ -886,6 +899,7 @@ end
 -- Running real time all relative functions.
 
 function OnUpdate(deltaTime)
+        RefreshRootScale()
         updateEffects(deltaTime)
         if gameOver or not currentPiece then
                 redraw()

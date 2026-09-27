@@ -152,31 +152,47 @@ local function Hash2D(gx, gy)
 	return v - math.floor(v)
 end
 
+local featureCache = {}
+local featureCacheCount = 0
+
 -- Returns what procedural terrain feature exists at grid cell (gx, gy):
 -- "ROAD" | "TREE" | "MOSS" | "FLOWER" | "GRASS"
 local function GetCellFeature(gx, gy)
+	local key = gx * 65536 + gy
+	local cached = featureCache[key]
+	if cached then return cached end
+
+	local feat
 	-- Keep starting spawn plaza (around 0,0) clear of trees
 	if math.abs(gx) <= 1 and math.abs(gy) <= 1 then
-		return "ROAD"
-	end
-
-	-- Endless winding horizontal & vertical cobblestone roads intersecting at (0,0)
-	local roadWaveH = math.floor(math.sin(gx * 0.32) * 1.4 + 0.5)
-	local roadWaveV = math.floor(math.sin(gy * 0.28) * 1.4 + 0.5)
-	if (gy + roadWaveH) % 9 == 0 or (gx + roadWaveV) % 11 == 0 then
-		return "ROAD"
-	end
-
-	local h = Hash2D(gx, gy)
-	if h < 0.16 then
-		return "TREE"
-	elseif h < 0.36 then
-		return "MOSS"
-	elseif h < 0.46 then
-		return "FLOWER"
+		feat = "ROAD"
 	else
-		return "GRASS"
+		-- Endless winding horizontal & vertical cobblestone roads intersecting at (0,0)
+		local roadWaveH = math.floor(math.sin(gx * 0.32) * 1.4 + 0.5)
+		local roadWaveV = math.floor(math.sin(gy * 0.28) * 1.4 + 0.5)
+		if (gy + roadWaveH) % 9 == 0 or (gx + roadWaveV) % 11 == 0 then
+			feat = "ROAD"
+		else
+			local h = Hash2D(gx, gy)
+			if h < 0.16 then
+				feat = "TREE"
+			elseif h < 0.36 then
+				feat = "MOSS"
+			elseif h < 0.46 then
+				feat = "FLOWER"
+			else
+				feat = "GRASS"
+			end
+		end
 	end
+
+	if featureCacheCount > 4096 then
+		featureCache = {}
+		featureCacheCount = 0
+	end
+	featureCache[key] = feat
+	featureCacheCount = featureCacheCount + 1
+	return feat
 end
 
 -- Checks if world position (wx, wy) collides with a procedural forest tree trunk
@@ -1066,67 +1082,81 @@ local function RenderEndlessWorldAndHUD(dt)
 			local cell = gridCells[(r - 1) * GRID_COLS + c]
 			local sx = DESIGN_WIDTH * 0.5 + (gx * CELL_SIZE - mage.wx) + shakeX
 			local sy = DESIGN_HEIGHT * 0.5 + (gy * CELL_SIZE - mage.wy) + shakeY
-			local feat = GetCellFeature(gx, gy)
+
+			local feat = cell.feat
+			if cell.gx ~= gx or cell.gy ~= gy then
+				cell.gx = gx
+				cell.gy = gy
+				feat = GetCellFeature(gx, gy)
+				cell.mortarOffset = ((gx + gy) % 2 == 0) and 14 or -14
+
+				if cell.feat ~= feat then
+					cell.feat = feat
+					if feat == "ROAD" then
+						cell.tile:SetImage(Enum.ImageSource.StaticReference, RECT_RES)
+						cell.tile.imageColor = Color.FromRGB(142, 108, 72)
+						cell.tile:SetSizeDelta(CELL_SIZE + 2, CELL_SIZE + 2)
+						cell.tile:SetVisible(true)
+
+						cell.brickMortar.imageColor = Color.FromRGB(115, 84, 52)
+						cell.brickMortar:SetVisible(true)
+
+						cell.trunk:SetVisible(false)
+						cell.canopy:SetVisible(false)
+						cell.canopyTop:SetVisible(false)
+
+					elseif feat == "TREE" then
+						-- Dark moss patch under tree + Trunk + Two-Tone Pixel Canopy
+						cell.tile:SetImage(Enum.ImageSource.StaticReference, CIRCLE_RES)
+						cell.tile.imageColor = Color.FromRGBA(78, 112, 54, 185)
+						cell.tile:SetSizeDelta(64, 42)
+						cell.tile:SetVisible(true)
+						cell.brickMortar:SetVisible(false)
+
+						cell.trunk:SetVisible(true)
+						cell.canopy:SetVisible(true)
+						cell.canopyTop:SetVisible(true)
+
+					elseif feat == "MOSS" then
+						cell.tile:SetImage(Enum.ImageSource.StaticReference, CIRCLE_RES)
+						cell.tile.imageColor = Color.FromRGBA(82, 118, 56, 165)
+						cell.tile:SetSizeDelta(68, 48)
+						cell.tile:SetVisible(true)
+						cell.brickMortar:SetVisible(false)
+						cell.trunk:SetVisible(false)
+						cell.canopy:SetVisible(false)
+						cell.canopyTop:SetVisible(false)
+
+					elseif feat == "FLOWER" then
+						cell.tile:SetImage(Enum.ImageSource.StaticReference, STAR4_RES)
+						cell.tile.imageColor = Color.FromRGB(250, 250, 235)
+						cell.tile:SetSizeDelta(16, 16)
+						cell.tile:SetVisible(true)
+						cell.brickMortar:SetVisible(false)
+						cell.trunk:SetVisible(false)
+						cell.canopy:SetVisible(false)
+						cell.canopyTop:SetVisible(false)
+
+					else
+						cell.tile:SetVisible(false)
+						cell.brickMortar:SetVisible(false)
+						cell.trunk:SetVisible(false)
+						cell.canopy:SetVisible(false)
+						cell.canopyTop:SetVisible(false)
+					end
+				end
+			end
 
 			if feat == "ROAD" then
-				cell.tile:SetImage(Enum.ImageSource.StaticReference, RECT_RES)
-				cell.tile.imageColor = Color.FromRGB(142, 108, 72)
-				cell.tile:SetSizeDelta(CELL_SIZE + 2, CELL_SIZE + 2)
 				cell.tile:SetAnchoredPosition(sx, sy)
-				cell.tile:SetVisible(true)
-
-				cell.brickMortar.imageColor = Color.FromRGB(115, 84, 52)
-				cell.brickMortar:SetAnchoredPosition(sx, sy + ((gx + gy) % 2 == 0 and 14 or -14))
-				cell.brickMortar:SetVisible(true)
-
-				cell.trunk:SetVisible(false)
-				cell.canopy:SetVisible(false)
-				cell.canopyTop:SetVisible(false)
-
+				cell.brickMortar:SetAnchoredPosition(sx, sy + cell.mortarOffset)
 			elseif feat == "TREE" then
-				-- Dark moss patch under tree + Trunk + Two-Tone Pixel Canopy
-				cell.tile:SetImage(Enum.ImageSource.StaticReference, CIRCLE_RES)
-				cell.tile.imageColor = Color.FromRGBA(78, 112, 54, 185)
-				cell.tile:SetSizeDelta(64, 42)
 				cell.tile:SetAnchoredPosition(sx, sy - 6)
-				cell.tile:SetVisible(true)
-				cell.brickMortar:SetVisible(false)
-
 				cell.trunk:SetAnchoredPosition(sx, sy - 10)
-				cell.trunk:SetVisible(true)
 				cell.canopy:SetAnchoredPosition(sx, sy + 14)
-				cell.canopy:SetVisible(true)
 				cell.canopyTop:SetAnchoredPosition(sx, sy + 24)
-				cell.canopyTop:SetVisible(true)
-
-			elseif feat == "MOSS" then
-				cell.tile:SetImage(Enum.ImageSource.StaticReference, CIRCLE_RES)
-				cell.tile.imageColor = Color.FromRGBA(82, 118, 56, 165)
-				cell.tile:SetSizeDelta(68, 48)
+			elseif feat == "MOSS" or feat == "FLOWER" then
 				cell.tile:SetAnchoredPosition(sx, sy)
-				cell.tile:SetVisible(true)
-				cell.brickMortar:SetVisible(false)
-				cell.trunk:SetVisible(false)
-				cell.canopy:SetVisible(false)
-				cell.canopyTop:SetVisible(false)
-
-			elseif feat == "FLOWER" then
-				cell.tile:SetImage(Enum.ImageSource.StaticReference, STAR4_RES)
-				cell.tile.imageColor = Color.FromRGB(250, 250, 235)
-				cell.tile:SetSizeDelta(16, 16)
-				cell.tile:SetAnchoredPosition(sx, sy)
-				cell.tile:SetVisible(true)
-				cell.brickMortar:SetVisible(false)
-				cell.trunk:SetVisible(false)
-				cell.canopy:SetVisible(false)
-				cell.canopyTop:SetVisible(false)
-
-			else
-				cell.tile:SetVisible(false)
-				cell.brickMortar:SetVisible(false)
-				cell.trunk:SetVisible(false)
-				cell.canopy:SetVisible(false)
-				cell.canopyTop:SetVisible(false)
 			end
 		end
 	end
