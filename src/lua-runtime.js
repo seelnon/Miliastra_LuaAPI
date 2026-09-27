@@ -557,27 +557,18 @@ export class MiliastraSimulator {
       this.rootControl.sizeDeltaX = this.width;
       this.rootControl.sizeDeltaY = this.height;
     }
-    // Only resize scriptHost if the Lua script has NOT customized its dimensions/pivot (e.g. Tetri-shot sets script.object to 280x560 centered)
+    // Only resize scriptHost if the Lua script has NOT anchored/centered it as a fixed design container
     if (
       this.scriptHost &&
       this.scriptHost.sizeDeltaX === oldWidth &&
       this.scriptHost.sizeDeltaY === oldHeight &&
+      this.scriptHost.anchorMinX === 0 &&
+      this.scriptHost.anchorMinY === 0 &&
       this.scriptHost.pivotX === 0 &&
       this.scriptHost.pivotY === 0
     ) {
       this.scriptHost.sizeDeltaX = this.width;
       this.scriptHost.sizeDeltaY = this.height;
-    }
-    // Update any full-viewport overlay controls that were sized to GetUICanvasSize() in OnStart()
-    if (this.controlsById) {
-      for (const ctrl of this.controlsById.values()) {
-        if (ctrl !== this.rootControl && ctrl !== this.scriptHost) {
-          if (ctrl.sizeDeltaX === oldWidth && ctrl.sizeDeltaY === oldHeight) {
-            ctrl.sizeDeltaX = this.width;
-            ctrl.sizeDeltaY = this.height;
-          }
-        }
-      }
     }
     this.log(`Viewport updated to ${this.width} × ${this.height}`, 'info');
     if (this.isRunning) {
@@ -702,8 +693,8 @@ export class MiliastraSimulator {
         'Tab': [27], // KeyboardOpenShortcutWheelKeyDown
         'ControlLeft': [29], // KeyboardSwitchToWalkOrRunKeyDown
         'ControlRight': [40], // KeyboardCraftspersonKey40Down
-        'ShiftLeft': [13, 71], // KeyboardSprintKeyDown, KeyboardCraftspersonKey41Down
-        'ShiftRight': [13, 71],
+        'ShiftLeft': [71, 13], // KeyboardCraftspersonKey41Down (71) first, then KeyboardSprintKeyDown (13)
+        'ShiftRight': [71, 13],
         'Digit1': [31], 'Digit2': [32], 'Digit3': [33], 'Digit4': [34], 'Digit5': [35],
         'Digit6': [36], 'Digit7': [37], 'Digit8': [38], 'Digit9': [39], 'Digit0': [40]
       };
@@ -930,8 +921,16 @@ export class MiliastraSimulator {
         local cb = _M_CursorCallbacks[callbackId]
         if cb then
           local eventData = {
+            dragging = false,
+            touchId = -1,
             GetUIPos = function(self)
               return cursorX, cursorY
+            end,
+            GetPressUIPos = function(self)
+              return cursorX, cursorY
+            end,
+            GetUIPosDelta = function(self)
+              return 0, 0
             end,
             uipos = { x = cursorX, y = cursorY },
             cursorX = cursorX,
@@ -1101,6 +1100,7 @@ export class MiliastraSimulator {
           Dynamic = 9
         },
         ImageType = {
+          Basic = 0,
           Simple = 0,
           Sliced = 1,
           Tiled = 2,
@@ -1115,9 +1115,93 @@ export class MiliastraSimulator {
           Radial180 = 4,
           Radial360 = 5
         },
+        ImageFillHorizontalType = {
+          Left = 0,
+          Right = 1
+        },
+        ImageFillVerticalType = {
+          Bottom = 0,
+          Top = 1
+        },
+        ImageFillRadial90Type = {
+          BottomLeft = 0,
+          TopLeft = 1,
+          TopRight = 2,
+          BottomRight = 3
+        },
+        ImageFillRadialType = {
+          Bottom = 0,
+          Top = 1,
+          Left = 2,
+          Right = 3
+        },
         ImageMaskSoftEdgeMode = {
+          Pixel = 0,
           Absolute = 0,
           Percentage = 1
+        },
+        ScrollDirection = {
+          Horizontal = 0,
+          Vertical = 1
+        },
+        ScrollLayoutConstraint = {
+          AutoWrap = 0,
+          Fixed = 1
+        },
+        ScrollAlignType = {
+          Top = 0,
+          Center = 1,
+          Bottom = 2,
+          Left = 0,
+          Right = 2
+        },
+        UIAnimationLayer = {
+          BelowAllControls = 0,
+          AboveAllControls = 1
+        },
+        ControllerNavigationDir = {
+          Up = 0,
+          Down = 1,
+          Left = 2,
+          Right = 3
+        },
+        ControllerNavigationMode = {
+          None = 0,
+          Automatic = 1,
+          Specified = 2
+        },
+        ControllerNavigationEventType = {
+          NavigateIn = 0,
+          NavigateOut = 1,
+          ConfirmDown = 2,
+          ConfirmUp = 3,
+          CancelDown = 4,
+          CancelUp = 5
+        },
+        KeyboardKeyCode = {
+          None = 0,
+          Space = 32,
+          KeyW = 87,
+          KeyA = 65,
+          KeyS = 83,
+          KeyD = 68,
+          KeyE = 69,
+          KeyF = 70,
+          KeyQ = 81,
+          KeyR = 82
+        },
+        ControllerKeyCode = {
+          None = 0,
+          ButtonSouth = 1,
+          ButtonEast = 2,
+          ButtonWest = 3,
+          ButtonNorth = 4,
+          LeftShoulder = 5,
+          RightShoulder = 6
+        },
+        StageMode = {
+          Beyond = 1,
+          Classic = 2
         },
         TextHorizontalAlignment = {
           Left = 0,
@@ -1303,6 +1387,8 @@ export class MiliastraSimulator {
 
       -- 4. Wrap JS Control in Lua Metatable (Cached + Pre-allocated Method Table for 60FPS Zero-Allocation Calls)
       local _ControlWrapCache = {}
+      local _ControlScripts = {}
+      local _AllMountedScripts = {}
       local wrapControl
 
       local _ControlMethods = {
@@ -1338,7 +1424,27 @@ export class MiliastraSimulator {
           self._raw:SetLocalRotation(x, y, z)
         end,
         SetActive = function(self, active)
-          self._raw:SetActive(active)
+          local raw = self._raw
+          local wasActive = raw.active ~= false
+          local nextActive = not not active
+          raw:SetActive(nextActive)
+          if wasActive ~= nextActive then
+            local scripts = _ControlScripts[tostring(raw.id)]
+            if scripts then
+              for _, s in ipairs(scripts) do
+                if s.alive and s._env then
+                  local hookName = nextActive and "OnEnable" or "OnDisable"
+                  local fn = rawget(s._env, hookName)
+                  if type(fn) == "function" then
+                    local ok, err = pcall(fn)
+                    if not ok then
+                      printerr("[" .. tostring(s.path) .. " " .. hookName .. " Error]: " .. tostring(err))
+                    end
+                  end
+                end
+              end
+            end
+          end
         end,
         SetImage = function(self, src, resId)
           self._raw:SetImage(src, resId)
@@ -1370,7 +1476,20 @@ export class MiliastraSimulator {
           return self._raw:GetSiblingIndex()
         end,
         Destroy = function(self)
-          self._raw:Destroy()
+          local raw = self._raw
+          local scripts = _ControlScripts[tostring(raw.id)]
+          if scripts then
+            for _, s in ipairs(scripts) do
+              if s.alive and s._env then
+                local onDis = rawget(s._env, "OnDisable")
+                if type(onDis) == "function" then pcall(onDis) end
+                local onDes = rawget(s._env, "OnDestroy")
+                if type(onDes) == "function" then pcall(onDes) end
+              end
+              s.alive = false
+            end
+          end
+          raw:Destroy()
         end,
         GetParent = function(self)
           return wrapControl(self._raw:GetParent())
@@ -1379,13 +1498,43 @@ export class MiliastraSimulator {
           return self
         end,
         GetScript = function(self, scriptPrefabIndex)
+          local targetIdx = tonumber(scriptPrefabIndex)
+          local scripts = _ControlScripts[tostring(self._raw.id)]
+          if scripts and targetIdx then
+            for _, s in ipairs(scripts) do
+              if s.prefabIndex == targetIdx or s.id == targetIdx then
+                return s
+              end
+            end
+          end
           return nil
         end,
         GetScriptByPath = function(self, path)
+          if not path then return nil end
+          local clean = tostring(path):gsub("%.lua$", "")
+          local lower = string.lower(clean)
+          local scripts = _ControlScripts[tostring(self._raw.id)]
+          if scripts then
+            for _, s in ipairs(scripts) do
+              if s.path == clean or string.lower(s.path) == lower then
+                return s
+              end
+              if s._aliases and (s._aliases[clean] or s._aliases[lower]) then
+                return s
+              end
+            end
+          end
           return nil
         end,
         GetScripts = function(self)
-          return {}
+          local scripts = _ControlScripts[tostring(self._raw.id)]
+          local out = {}
+          if scripts then
+            for i = 1, #scripts do
+              out[i] = scripts[i]
+            end
+          end
+          return out
         end,
         GetAnchorMin = function(self)
           local raw = self._raw
@@ -1584,15 +1733,65 @@ export class MiliastraSimulator {
         interactable = function(jsCtrl) return jsCtrl.interactable end,
         raycastTarget = function(jsCtrl) return jsCtrl.raycastTarget end,
         adaptiveFontSize = function(jsCtrl) return jsCtrl.adaptiveFontSize end,
+        minimumFontSize = function(jsCtrl) return jsCtrl.minimumFontSize or 10 end,
+        enableOutline = function(jsCtrl) return jsCtrl.enableOutline == true end,
+        outlineColor = function(jsCtrl)
+          local oc = jsCtrl.outlineColor
+          return oc and Color.FromRGBA(oc.r, oc.g, oc.b, oc.a) or Color.FromRGBA(0, 0, 0, 255)
+        end,
         horizontalAlignment = function(jsCtrl) return jsCtrl.horizontalAlignment end,
         verticalAlignment = function(jsCtrl) return jsCtrl.verticalAlignment end,
         prefabIndex = function(jsCtrl) return jsCtrl.templateId or jsCtrl.id end,
         id = function(jsCtrl) return jsCtrl.id end,
-        parent = function(jsCtrl) return wrapControl(jsCtrl.parent) end
+        parent = function(jsCtrl) return wrapControl(jsCtrl.parent) end,
+        canControllerFocus = function(jsCtrl) return jsCtrl.canControllerFocus ~= false end,
+        enableMask = function(jsCtrl) return jsCtrl.enableMask == true end,
+        enableSoftEdge = function(jsCtrl) return jsCtrl.enableSoftEdge == true end,
+        softEdgeMode = function(jsCtrl) return jsCtrl.softEdgeMode or 1 end,
+        softEdgeWidthX = function(jsCtrl) return jsCtrl.softEdgeWidthX or 0 end,
+        softEdgeWidthY = function(jsCtrl) return jsCtrl.softEdgeWidthY or 0 end,
+        horizontalSoftRange = function(jsCtrl) return jsCtrl.horizontalSoftRange or 0 end,
+        verticalSoftRange = function(jsCtrl) return jsCtrl.verticalSoftRange or 0 end,
+        reverseMaskArea = function(jsCtrl) return jsCtrl.reverseMaskArea == true end,
+        fillType = function(jsCtrl) return jsCtrl.fillType or 0 end,
+        fillHorizontalType = function(jsCtrl) return jsCtrl.fillHorizontalType or 0 end,
+        fillVerticalType = function(jsCtrl) return jsCtrl.fillVerticalType or 0 end,
+        fillRadial90Type = function(jsCtrl) return jsCtrl.fillRadial90Type or 0 end,
+        fillRadialType = function(jsCtrl) return jsCtrl.fillRadialType or 0 end,
+        fillAmount = function(jsCtrl) return jsCtrl.fillAmount ~= nil and jsCtrl.fillAmount or 1 end,
+        showScrollBar = function(jsCtrl) return jsCtrl.showScrollBar ~= false end,
+        clickAudioId = function(jsCtrl) return jsCtrl.clickAudioId or 0 end,
+        itemCount = function(jsCtrl) return jsCtrl.itemCount or 0 end,
+        itemPrefabIndex = function(jsCtrl) return jsCtrl.itemPrefabIndex or 1073741852 end,
+        scrollDirection = function(jsCtrl) return jsCtrl.scrollDirection or 1 end,
+        layoutConstraint = function(jsCtrl) return jsCtrl.layoutConstraint or 0 end,
+        layoutConstraintFixedCount = function(jsCtrl) return jsCtrl.layoutConstraintFixedCount or 0 end,
+        scrollProgress = function(jsCtrl) return jsCtrl.scrollProgress or 0 end,
+        isolateNavigation = function(jsCtrl) return jsCtrl.isolateNavigation == true end,
+        disableKeyEventPassthrough = function(jsCtrl) return jsCtrl.disableKeyEventPassthrough == true end,
+        disableCursorEventPassthrough = function(jsCtrl) return jsCtrl.disableCursorEventPassthrough == true end,
+        showCursor = function(jsCtrl) return jsCtrl.showCursor ~= false end,
+        animationId = function(jsCtrl) return jsCtrl.animationId or 0 end,
+        playSoundEffect = function(jsCtrl) return jsCtrl.playSoundEffect ~= false end,
+        layer = function(jsCtrl) return jsCtrl.layer or 0 end,
+        keyboardKeyCode = function(jsCtrl) return jsCtrl.keyboardKeyCode or 0 end,
+        controllerKeyCode = function(jsCtrl) return jsCtrl.controllerKeyCode or 0 end,
+        referencedPrefabIndex = function(jsCtrl) return jsCtrl.referencedPrefabIndex or jsCtrl.templateId or 0 end
       }
 
       local _ControlSetters = {
         name = function(jsCtrl, v) jsCtrl.name = v end,
+        parent = function(jsCtrl, v)
+          local newParent = v and v._raw or nil
+          if jsCtrl.parent and jsCtrl.parent.children then
+            local idx = jsCtrl.parent.children:indexOf(jsCtrl)
+            if idx ~= -1 then jsCtrl.parent.children:splice(idx, 1) end
+          end
+          jsCtrl.parent = newParent
+          if newParent and newParent.children then
+            newParent.children:push(jsCtrl)
+          end
+        end,
         text = function(jsCtrl, v) jsCtrl.text = tostring(v) end,
         fontSize = function(jsCtrl, v) jsCtrl.fontSize = tonumber(v) or 14 end,
         fontColor = function(jsCtrl, v)
@@ -1616,6 +1815,13 @@ export class MiliastraSimulator {
             jsCtrl.imageColor = v
           end
         end,
+        outlineColor = function(jsCtrl, v)
+          if type(v) == "table" then
+            jsCtrl.outlineColor = { r = tonumber(v.r) or 0, g = tonumber(v.g) or 0, b = tonumber(v.b) or 0, a = v.a ~= nil and tonumber(v.a) or 255 }
+          end
+        end,
+        enableOutline = function(jsCtrl, v) jsCtrl.enableOutline = not not v end,
+        minimumFontSize = function(jsCtrl, v) jsCtrl.minimumFontSize = tonumber(v) or 10 end,
         imageType = function(jsCtrl, v) jsCtrl.imageType = tonumber(v) or 4 end,
         resourceId = function(jsCtrl, v) jsCtrl.resourceId = tonumber(v) or v or 100001 end,
         anchoredPositionX = function(jsCtrl, v) jsCtrl.anchoredPositionX = tonumber(v) or 0 end,
@@ -1642,13 +1848,34 @@ export class MiliastraSimulator {
         adaptiveFontSize = function(jsCtrl, v) jsCtrl.adaptiveFontSize = not not v end,
         horizontalAlignment = function(jsCtrl, v) jsCtrl.horizontalAlignment = tonumber(v) or 1 end,
         verticalAlignment = function(jsCtrl, v) jsCtrl.verticalAlignment = tonumber(v) or 1 end,
+        canControllerFocus = function(jsCtrl, v) jsCtrl.canControllerFocus = not not v end,
+        isolateNavigation = function(jsCtrl, v) jsCtrl.isolateNavigation = not not v end,
         disableCursorEventPassthrough = function(jsCtrl, v) jsCtrl.disableCursorEventPassthrough = not not v end,
         disableKeyEventPassthrough = function(jsCtrl, v) jsCtrl.disableKeyEventPassthrough = not not v end,
         showCursor = function(jsCtrl, v) jsCtrl.showCursor = not not v end,
+        enableMask = function(jsCtrl, v) jsCtrl.enableMask = not not v end,
         enableSoftEdge = function(jsCtrl, v) jsCtrl.enableSoftEdge = not not v end,
+        softEdgeWidthX = function(jsCtrl, v) jsCtrl.softEdgeWidthX = tonumber(v) or 0 end,
+        softEdgeWidthY = function(jsCtrl, v) jsCtrl.softEdgeWidthY = tonumber(v) or 0 end,
         horizontalSoftRange = function(jsCtrl, v) jsCtrl.horizontalSoftRange = tonumber(v) or 0 end,
         verticalSoftRange = function(jsCtrl, v) jsCtrl.verticalSoftRange = tonumber(v) or 0 end,
-        softEdgeMode = function(jsCtrl, v) jsCtrl.softEdgeMode = tonumber(v) or 1 end
+        softEdgeMode = function(jsCtrl, v) jsCtrl.softEdgeMode = tonumber(v) or 1 end,
+        reverseMaskArea = function(jsCtrl, v) jsCtrl.reverseMaskArea = not not v end,
+        fillType = function(jsCtrl, v) jsCtrl.fillType = tonumber(v) or 0 end,
+        fillHorizontalType = function(jsCtrl, v) jsCtrl.fillHorizontalType = tonumber(v) or 0 end,
+        fillVerticalType = function(jsCtrl, v) jsCtrl.fillVerticalType = tonumber(v) or 0 end,
+        fillRadial90Type = function(jsCtrl, v) jsCtrl.fillRadial90Type = tonumber(v) or 0 end,
+        fillRadialType = function(jsCtrl, v) jsCtrl.fillRadialType = tonumber(v) or 0 end,
+        fillAmount = function(jsCtrl, v) jsCtrl.fillAmount = tonumber(v) or 1 end,
+        showScrollBar = function(jsCtrl, v) jsCtrl.showScrollBar = not not v end,
+        clickAudioId = function(jsCtrl, v) jsCtrl.clickAudioId = tonumber(v) or 0 end,
+        itemPrefabIndex = function(jsCtrl, v) jsCtrl.itemPrefabIndex = tonumber(v) or 1073741852 end,
+        scrollProgress = function(jsCtrl, v) jsCtrl.scrollProgress = tonumber(v) or 0 end,
+        animationId = function(jsCtrl, v) jsCtrl.animationId = tonumber(v) or 0 end,
+        playSoundEffect = function(jsCtrl, v) jsCtrl.playSoundEffect = not not v end,
+        layer = function(jsCtrl, v) jsCtrl.layer = tonumber(v) or 0 end,
+        keyboardKeyCode = function(jsCtrl, v) jsCtrl.keyboardKeyCode = tonumber(v) or 0 end,
+        controllerKeyCode = function(jsCtrl, v) jsCtrl.controllerKeyCode = tonumber(v) or 0 end
       }
 
       local _ControlMeta = {
@@ -1666,6 +1893,13 @@ export class MiliastraSimulator {
           else
             rawset(t, k, v)
           end
+        end,
+        __tostring = function(t)
+          local raw = t._raw
+          if not raw then return "ClientUIBaseControl:0" end
+          local clsName = raw.className or "ClientUIImageControl"
+          local handle = raw.userdataHandle or raw.id or 75
+          return tostring(clsName) .. ":" .. tostring(handle)
         end
       }
 
@@ -2072,6 +2306,7 @@ export class MiliastraSimulator {
         self.isPlaying = true
         self.executedCallbacks = {}
         for _, item in ipairs(self.items) do
+          item.completed = false
           if item.type == "tween" and item.target then
             item.target:Restart()
             item.target.isPlaying = false
@@ -2128,10 +2363,15 @@ export class MiliastraSimulator {
         for _, item in ipairs(self.items) do
           if item.type == "tween" and item.target then
             local tw = item.target
-            if self.elapsed >= item.time then
+            if self.elapsed >= item.time and not item.completed then
               local localElapsed = self.elapsed - item.time
-              local p = math.min(localElapsed / math.max(item.duration, 0.0001), 1)
-              tw:ApplyProgress(p)
+              if localElapsed >= item.duration then
+                item.completed = true
+                tw:ApplyProgress(1)
+              else
+                local p = math.min(localElapsed / math.max(item.duration, 0.0001), 1)
+                tw:ApplyProgress(p)
+              end
             end
           elseif item.type == "callback" and item.target then
             if self.elapsed >= item.time and not self.executedCallbacks[item] then
@@ -2147,6 +2387,12 @@ export class MiliastraSimulator {
           if self.loops == -1 or self.loopCount < self.loops then
             self.elapsed = self.elapsed - self.totalDuration
             self.executedCallbacks = {}
+            for _, item in ipairs(self.items) do
+              item.completed = false
+              if item.type == "tween" and item.target then
+                item.target.hasCapturedStart = false
+              end
+            end
           else
             self.isCompleted = true
             self.isPlaying = false
@@ -2341,24 +2587,34 @@ export class MiliastraSimulator {
         end
       }
 
-      -- 7. Global Script Object
+      -- 7. Global Script Object & Multi-Script Mounting Engine
       local scriptHostControl = wrapControl(sim.scriptHost)
       script = {
+        alive = true,
+        id = 1,
+        prefabIndex = 1073741860,
+        path = "Scratchpad",
+        enabled = true,
         object = scriptHostControl,
         parent = scriptHostControl,
-        GetControl = function(self) return scriptHostControl end,
-        GetParent = function(self) return scriptHostControl end,
+        _updateEnabled = false,
+        _env = _G,
+        _aliases = { Scratchpad = true, scratchpad = true },
+        GetControl = function(self) return self.object end,
+        GetParent = function(self) return self.object end,
         EnableUpdate = function(self, enabled)
+          self._updateEnabled = not not enabled
           sim.updateEnabled = not not enabled
         end,
         SetUpdateEnabled = function(self, enabled)
+          self._updateEnabled = not not enabled
           sim.updateEnabled = not not enabled
         end,
-        RegisterCustomVariableChangedHandler = function(self, varName, handler)
+        RegisterCustomVariableChangedHandler = function(self, entityOrVar, varName, handler)
         end,
         RegisterServerSignalHandler = function(self, signalName, callback)
         end,
-        UnregisterCustomVariableChangedHandler = function(self, varName)
+        UnregisterCustomVariableChangedHandler = function(self, entityOrVar, varName)
         end,
         UnregisterServerSignalHandler = function(self, signalName)
         end,
@@ -2366,9 +2622,164 @@ export class MiliastraSimulator {
           return nil
         end,
         Invoke = function(self, funcName, ...)
+          if not self.alive then return nil end
+          local env = self._env or _G
+          local fn = rawget(env, funcName) or _G[funcName]
+          if type(fn) == "function" then
+            return fn(...)
+          end
           return nil
         end
       }
+      _ControlScripts[tostring(sim.scriptHost.id)] = { script }
+
+      function _ResetMountedScripts()
+        _ControlScripts = {}
+        _AllMountedScripts = {}
+      end
+
+      -- Mounts an isolated Lua script instance onto a specific UI Control
+      function _MountScriptOnControl(hostCtrlRaw, scriptId, scriptPath, scriptPrefabIndex, luaCode, aliasList)
+        local hostWrapped = wrapControl(hostCtrlRaw)
+        local scriptEnv = setmetatable({}, { __index = _G })
+        local aliases = {}
+        local cleanPrimary = tostring(scriptPath or "Script"):gsub("%.lua$", "")
+        aliases[cleanPrimary] = true
+        aliases[string.lower(cleanPrimary)] = true
+        if type(aliasList) == "table" then
+          for _, a in ipairs(aliasList) do
+            local ca = tostring(a):gsub("%.lua$", "")
+            aliases[ca] = true
+            aliases[string.lower(ca)] = true
+          end
+        end
+
+        local scriptInstance = {
+          alive = true,
+          id = tonumber(scriptId) or (#_AllMountedScripts + 1),
+          prefabIndex = tonumber(scriptPrefabIndex) or (1073741860 + #_AllMountedScripts + 1),
+          path = cleanPrimary,
+          enabled = true,
+          object = hostWrapped,
+          parent = hostWrapped,
+          _updateEnabled = false,
+          _env = scriptEnv,
+          _aliases = aliases,
+          GetControl = function(self) return hostWrapped end,
+          GetParent = function(self) return hostWrapped end,
+          EnableUpdate = function(self, enabled)
+            self._updateEnabled = not not enabled
+          end,
+          SetUpdateEnabled = function(self, enabled)
+            self._updateEnabled = not not enabled
+          end,
+          RegisterCustomVariableChangedHandler = function(self, entityOrVar, varName, handler) end,
+          RegisterServerSignalHandler = function(self, signalName, callback) end,
+          UnregisterCustomVariableChangedHandler = function(self, entityOrVar, varName) end,
+          UnregisterServerSignalHandler = function(self, signalName) end,
+          GetParam = function(self, name) return nil end,
+          Invoke = function(self, funcName, ...)
+            if not self.alive then
+              printerr("[Invoke Warning] Attempted to Invoke '" .. tostring(funcName) .. "' on dead script: " .. tostring(self.path))
+              return nil
+            end
+            local fn = rawget(scriptEnv, funcName)
+            if type(fn) == "function" then
+              sim:log("[Cross-Script Invoke] " .. tostring(self.path) .. ":Invoke('" .. tostring(funcName) .. "')", "info")
+              return fn(...)
+            end
+            printerr("[Invoke Warning] Function '" .. tostring(funcName) .. "' not found on script '" .. tostring(self.path) .. "'")
+            return nil
+          end
+        }
+
+        scriptEnv.script = scriptInstance
+        scriptEnv._G = scriptEnv
+
+        local ctrlKey = tostring(hostCtrlRaw.id)
+        if not _ControlScripts[ctrlKey] then
+          _ControlScripts[ctrlKey] = {}
+        end
+        table.insert(_ControlScripts[ctrlKey], scriptInstance)
+        table.insert(_AllMountedScripts, scriptInstance)
+
+        local chunk, compileErr
+        if setfenv then
+          local loader = loadstring or load
+          chunk, compileErr = loader(luaCode, "@" .. cleanPrimary)
+          if chunk then
+            setfenv(chunk, scriptEnv)
+          end
+        else
+          chunk, compileErr = load(luaCode, "@" .. cleanPrimary, "t", scriptEnv)
+        end
+        if not chunk then
+          printerr("[Compile Error in " .. cleanPrimary .. "]: " .. tostring(compileErr))
+          return nil
+        end
+        local ok, execErr = pcall(chunk)
+        if not ok then
+          printerr("[Exec Error in " .. cleanPrimary .. "]: " .. tostring(execErr))
+          return nil
+        end
+        return scriptInstance
+      end
+
+      -- Executes Stage Start Lifecycle Order (OnInit -> OnEnable -> OnStart) across all mounted scripts
+      function _StartMountedScripts()
+        -- 1. OnInit across hierarchy
+        for _, s in ipairs(_AllMountedScripts) do
+          if s.alive and s.object._raw.active ~= false then
+            local fn = rawget(s._env, "OnInit")
+            if type(fn) == "function" then
+              local ok, err = pcall(fn)
+              if not ok then printerr("[" .. s.path .. " OnInit Error]: " .. tostring(err)) end
+            end
+          end
+        end
+        -- 2. OnEnable across hierarchy
+        for _, s in ipairs(_AllMountedScripts) do
+          if s.alive and s.object._raw.active ~= false then
+            local fn = rawget(s._env, "OnEnable")
+            if type(fn) == "function" then
+              local ok, err = pcall(fn)
+              if not ok then printerr("[" .. s.path .. " OnEnable Error]: " .. tostring(err)) end
+            end
+          end
+        end
+        -- 3. OnStart across hierarchy
+        for _, s in ipairs(_AllMountedScripts) do
+          if s.alive and s.object._raw.active ~= false then
+            local fn = rawget(s._env, "OnStart")
+            if type(fn) == "function" then
+              local ok, err = pcall(fn)
+              if not ok then
+                printerr("[" .. s.path .. " OnStart Error]: " .. tostring(err))
+              else
+                sim:log("✓ [" .. s.path .. "] OnStart() executed on " .. tostring(s.object) .. " (control.id=" .. tostring(s.object.id) .. ", script.id=" .. tostring(s.id) .. ")", "info")
+              end
+            end
+          end
+        end
+      end
+
+      -- Executes per-frame OnUpdate and OnLevelUpdate across all mounted scripts with EnableUpdate(true)
+      function _UpdateMountedScripts(dt)
+        for _, s in ipairs(_AllMountedScripts) do
+          if s.alive and s.object._raw.alive and s.object._raw.active ~= false and s._updateEnabled then
+            local fn = rawget(s._env, "OnUpdate")
+            if type(fn) == "function" then
+              local ok, err = pcall(fn, dt)
+              if not ok then printerr("[" .. s.path .. " OnUpdate Error]: " .. tostring(err)) end
+            end
+            local lfn = rawget(s._env, "OnLevelUpdate")
+            if type(lfn) == "function" then
+              local ok, err = pcall(lfn, dt)
+              if not ok then printerr("[" .. s.path .. " OnLevelUpdate Error]: " .. tostring(err)) end
+            end
+          end
+        end
+      end
     `;
 
     const status = lauxlib.luaL_dostring(this.L, to_luastring(bootstrapLua));
@@ -2391,8 +2802,399 @@ export class MiliastraSimulator {
     return ctrl;
   }
 
-  // Load and execute Lua code
-  run(luaCode) {
+  // Build a pre-configured multi-control, multi-script scene hierarchy
+  mountSceneHierarchy(sceneConfig) {
+    // Remove default single-file scriptHost so rootControl only contains scene hierarchy children
+    this.rootControl.children = [];
+    this.controlsById.clear();
+
+    this.rootControl.id = sceneConfig.rootId || 1;
+    this.rootControl.name = sceneConfig.rootName || 'ContainerControl';
+    this.rootControl.className = 'ClientUIContainerControl';
+    this.rootControl.templateId = sceneConfig.rootPrefabIndex || 1073741852;
+    this.rootControl.prefabIndex = this.rootControl.templateId;
+    this.rootControl.userdataHandle = 1;
+    this.rootControl.sizeDeltaX = this.width;
+    this.rootControl.sizeDeltaY = this.height;
+    this.controlsById.set(this.rootControl.id, this.rootControl);
+
+    lua.lua_getglobal(this.L, to_luastring('_ResetMountedScripts'));
+    if (lua.lua_isfunction(this.L, -1)) {
+      lua.lua_pcall(this.L, 0, 0, 0);
+    } else {
+      lua.lua_pop(this.L, 1);
+    }
+
+    const mountScriptHelper = (ctrl, scriptDef) => {
+      if (!scriptDef || !scriptDef.code) return;
+      lua.lua_getglobal(this.L, to_luastring('_MountScriptOnControl'));
+      if (lua.lua_isfunction(this.L, -1)) {
+        interop.push(this.L, ctrl);
+        lua.lua_pushnumber(this.L, scriptDef.id || 1);
+        lua.lua_pushstring(this.L, to_luastring(scriptDef.path || ctrl.name));
+        lua.lua_pushnumber(this.L, scriptDef.prefabIndex || 1073741860);
+        lua.lua_pushstring(this.L, to_luastring(scriptDef.code));
+
+        const aliases = scriptDef.aliases || [scriptDef.path || ctrl.name, ctrl.name];
+        lua.lua_newtable(this.L);
+        aliases.forEach((alias, idx) => {
+          lua.lua_pushstring(this.L, to_luastring(alias));
+          lua.lua_rawseti(this.L, -2, idx + 1);
+        });
+
+        if (lua.lua_pcall(this.L, 6, 1, 0) !== lua.LUA_OK) {
+          const err = getLuaStackString(this.L, -1);
+          this.log(`[Mount Error (${scriptDef.path})]: ${err}`, 'error');
+        } else {
+          lua.lua_pop(this.L, 1);
+          this.log(`[Mounted Script] external_lua_file/${scriptDef.path} -> ${ctrl.className}:${ctrl.userdataHandle} (control.id=${ctrl.id}, prefabIndex=${ctrl.prefabIndex}, script.id=${scriptDef.id})`, 'info');
+        }
+      } else {
+        lua.lua_pop(this.L, 1);
+      }
+    };
+
+    const createdControls = new Map();
+    createdControls.set('root', this.rootControl);
+    createdControls.set(this.rootControl.name, this.rootControl);
+
+    this.log(`[Hierarchy Root] ${this.rootControl.name} (id=${this.rootControl.id}, prefabIndex=${this.rootControl.prefabIndex})`, 'info');
+
+    const orderedNodes = [...(sceneConfig.nodes || [])].sort((a, b) => (a.depth || 0) - (b.depth || 0));
+
+    for (const node of orderedNodes) {
+      // Skip duplicating the root container node if it is listed at depth 0 in sceneConfig.nodes
+      if (node.key === 'root' || node.depth === 0) {
+        if (node.script && node.script.code) {
+          mountScriptHelper(this.rootControl, node.script);
+        }
+        continue;
+      }
+
+      const parentCtrl = (node.parentKey && createdControls.get(node.parentKey)) || this.rootControl;
+      const ctrl = new VirtualUIControl(node.id, parentCtrl, node.name);
+      ctrl.templateId = node.prefabIndex || 1073741850;
+      ctrl.prefabIndex = ctrl.templateId;
+      ctrl.className = node.className || 'ClientUIImageControl';
+      ctrl.userdataHandle = node.userdataHandle || node.id;
+      ctrl.anchorMinX = node.anchorMinX !== undefined ? node.anchorMinX : 0.5;
+      ctrl.anchorMinY = node.anchorMinY !== undefined ? node.anchorMinY : 0.5;
+      ctrl.anchorMaxX = node.anchorMaxX !== undefined ? node.anchorMaxX : 0.5;
+      ctrl.anchorMaxY = node.anchorMaxY !== undefined ? node.anchorMaxY : 0.5;
+      ctrl.pivotX = node.pivotX !== undefined ? node.pivotX : 0.5;
+      ctrl.pivotY = node.pivotY !== undefined ? node.pivotY : 0.5;
+      ctrl.anchoredPositionX = node.x || 0;
+      ctrl.anchoredPositionY = node.y || 0;
+      ctrl.sizeDeltaX = node.width !== undefined ? node.width : 100;
+      ctrl.sizeDeltaY = node.height !== undefined ? node.height : 40;
+      ctrl.interactable = node.interactable !== false;
+      ctrl.raycastTarget = Boolean(node.raycastTarget);
+      ctrl.visible = node.visible !== false;
+
+      if (node.bgColor) {
+        ctrl.bgColor = { ...node.bgColor };
+      }
+      if (node.imageColor) {
+        ctrl.imageColor = { ...node.imageColor };
+        ctrl._explicitImageColor = true;
+      }
+      if (node.text !== undefined) {
+        ctrl.text = node.text;
+        ctrl.fontSize = node.fontSize || 14;
+        if (node.fontColor) ctrl.fontColor = { ...node.fontColor };
+      }
+      if (node.enableSoftEdge) {
+        ctrl.enableSoftEdge = true;
+        ctrl.softEdgeWidthX = node.softEdgeWidthX || 8;
+        ctrl.softEdgeWidthY = node.softEdgeWidthY || 8;
+      }
+      if (node.referencedPrefabIndex) {
+        ctrl.referencedPrefabIndex = node.referencedPrefabIndex;
+      }
+
+      this.controlsById.set(ctrl.id, ctrl);
+      createdControls.set(node.key || node.name, ctrl);
+
+      if (node.script && node.script.code) {
+        mountScriptHelper(ctrl, node.script);
+      }
+    }
+
+    lua.lua_getglobal(this.L, to_luastring('_StartMountedScripts'));
+    if (lua.lua_isfunction(this.L, -1)) {
+      if (lua.lua_pcall(this.L, 0, 0, 0) !== lua.LUA_OK) {
+        const err = getLuaStackString(this.L, -1);
+        this.log(`[Hierarchy Lifecycle Error]: ${err}`, 'error');
+      }
+    } else {
+      lua.lua_pop(this.L, 1);
+    }
+  }
+
+  // Programmatically trigger a click on a named or ID-matched UI control
+  triggerControlClick(nameOrId) {
+    if (!this.isRunning) return false;
+    let target = null;
+    for (const ctrl of this.controlsById.values()) {
+      if (ctrl.id === nameOrId || ctrl.name === nameOrId) {
+        target = ctrl;
+        break;
+      }
+    }
+    if (!target) return false;
+    const bounds = target.getScreenBounds(this.width, this.height);
+    const cx = (bounds.left + bounds.right) * 0.5;
+    const cy = (bounds.bottom + bounds.top) * 0.5;
+    this.lastDownTime = 0;
+    this.lastClickTime = 0;
+    this.dispatchCursorEvent(2, cx, cy, [target]);
+    this.dispatchCursorEvent(3, cx, cy, [target]);
+    this.dispatchCursorEvent(1, cx, cy, [target]);
+    return true;
+  }
+
+  buildDefaultCrossScriptBounceScene(activeCode) {
+    const isButtonScript = activeCode.includes('GetScriptByPath("Container_with_1pixel")') || activeCode.includes('BounceImage');
+    const isImageScript = !isButtonScript && (activeCode.includes('function Bounce()') && activeCode.includes('function SetMoveLeft('));
+    if (!isButtonScript && !isImageScript) return null;
+
+    const defaultButtonLua = `local controllerScript = nil
+
+local function BounceImage()
+    if controllerScript and controllerScript.alive then
+        controllerScript:Invoke("Bounce")
+    end
+end
+
+local function SetImageMovement(direction, held)
+    if controllerScript and controllerScript.alive then
+        controllerScript:Invoke(direction, held)
+    end
+end
+
+local function FindController(control)
+    local parent = control.parent
+    for depth = 1, 2 do
+        if not parent then return nil end
+        for _, child in ipairs(parent:GetChildren()) do
+            local candidate = child:GetScriptByPath("Container_with_1pixel")
+            if candidate then return candidate end
+        end
+        parent = parent.parent
+    end
+    return nil
+end
+
+function OnStart()
+    local button = script.object
+    controllerScript = FindController(button)
+
+    button:AddCursorEventListener(Enum.CursorEventType.CursorClick, function()
+        BounceImage()
+    end)
+
+    button:AddKeyEventListener(Enum.KeyEventType.KeyboardJumpKeyDown, function()
+        BounceImage()
+        return true
+    end)
+
+    button:AddKeyEventListener(Enum.KeyEventType.KeyboardMoveLeftKeyDown, function()
+        SetImageMovement("SetMoveLeft", true)
+        return true
+    end)
+
+    button:AddKeyEventListener(Enum.KeyEventType.KeyboardMoveRightKeyDown, function()
+        SetImageMovement("SetMoveRight", true)
+        return true
+    end)
+
+    button:AddKeyEventListener(Enum.KeyEventType.KeyboardMoveLeftKeyUp, function()
+        SetImageMovement("SetMoveLeft", false)
+        return true
+    end)
+
+    button:AddKeyEventListener(Enum.KeyEventType.KeyboardMoveRightKeyUp, function()
+        SetImageMovement("SetMoveRight", false)
+        return true
+    end)
+end`;
+
+    const defaultImageLua = `local image = nil
+local bounce = nil
+local isBouncing = false
+local moveLeftHeld = false
+local moveRightHeld = false
+local horizontalVelocity = 0
+
+local horizontalAcceleration = 1800
+local horizontalFriction = 2200
+local maxHorizontalSpeed = 420
+
+function OnStart()
+    image = script.object
+    script:EnableUpdate(true)
+    image.imageColor = Color.FromRGB(255, 0, 0)
+end
+
+function Bounce()
+    if not image or isBouncing then return end
+    isBouncing = true
+
+    local baseY = image.anchoredPositionY
+    local baseScaleX = image.localScaleX
+    local baseScaleY = image.localScaleY
+
+    bounce = game.TweenSequence()
+    bounce:Append(game.Tween(image, {
+        anchoredPositionY = baseY + 140,
+        localScaleX = baseScaleX * 0.92,
+        localScaleY = baseScaleY * 1.08
+    }, 0.45):SetEase(Enum.EaseType.OutQuad))
+
+    bounce:Append(game.Tween(image, {
+        anchoredPositionY = baseY,
+        localScaleX = baseScaleX * 1.15,
+        localScaleY = baseScaleY * 0.82
+    }, 0.28):SetEase(Enum.EaseType.InQuad))
+
+    bounce:Append(game.Tween(image, {
+        localScaleX = baseScaleX,
+        localScaleY = baseScaleY
+    }, 0.12):SetEase(Enum.EaseType.OutBack))
+
+    bounce:SetOnComplete(function()
+        isBouncing = false
+        bounce = nil
+    end)
+
+    bounce:Play()
+end
+
+function SetMoveLeft(held)
+    moveLeftHeld = held
+end
+
+function SetMoveRight(held)
+    moveRightHeld = held
+end
+
+function OnUpdate(deltaTime)
+    if not image then return end
+    local direction = 0
+    if moveLeftHeld then direction = direction - 1 end
+    if moveRightHeld then direction = direction + 1 end
+
+    if direction ~= 0 then
+        horizontalVelocity = horizontalVelocity + direction * horizontalAcceleration * deltaTime
+        horizontalVelocity = math.max(-maxHorizontalSpeed, math.min(maxHorizontalSpeed, horizontalVelocity))
+    elseif horizontalVelocity > 0 then
+        horizontalVelocity = math.max(0, horizontalVelocity - horizontalFriction * deltaTime)
+    elseif horizontalVelocity < 0 then
+        horizontalVelocity = math.min(0, horizontalVelocity + horizontalFriction * deltaTime)
+    end
+
+    image.anchoredPositionX = image.anchoredPositionX + horizontalVelocity * deltaTime
+end`;
+
+    return {
+      rootName: 'ContainerControl',
+      rootPrefabIndex: 1073741852,
+      nodes: [
+        {
+          id: 2,
+          userdataHandle: 42,
+          name: 'PresetButton',
+          className: 'ClientUIPresetButtonControl',
+          prefabIndex: 1073741851,
+          x: -340,
+          y: 230,
+          width: 132,
+          height: 38,
+          raycastTarget: true,
+          interactable: true,
+          bgColor: { r: 46, g: 40, b: 33, a: 235 },
+          text: 'Press it!',
+          fontSize: 15,
+          fontColor: { r: 245, g: 238, b: 220, a: 255 },
+          script: {
+            id: 1,
+            path: 'Button_toControl_Image_Bounce',
+            prefabIndex: 1073741861,
+            aliases: ['Button_toControl_Image_Bounce'],
+            code: isButtonScript ? activeCode : defaultButtonLua
+          }
+        },
+        {
+          id: 3,
+          userdataHandle: 58,
+          name: 'ReferenceControl',
+          className: 'ClientUIReferenceControl',
+          prefabIndex: 1073741859,
+          referencedPrefabIndex: 1073741850,
+          x: 0,
+          y: 0,
+          width: 0,
+          height: 0,
+          visible: false
+        },
+        {
+          id: 4,
+          userdataHandle: 75,
+          name: 'Container_with_1Pixel',
+          className: 'ClientUIImageControl',
+          prefabIndex: 1073741853,
+          x: 0,
+          y: 0,
+          width: 190,
+          height: 40,
+          enableSoftEdge: true,
+          softEdgeWidthX: 10,
+          softEdgeWidthY: 10,
+          imageColor: { r: 255, g: 0, b: 0, a: 255 },
+          script: {
+            id: 2,
+            path: 'Container_with_1pixel',
+            prefabIndex: 1073741862,
+            aliases: ['Container_with_1pixel', 'Image_Control', 'Container_with_1Pixel'],
+            code: isImageScript ? activeCode : defaultImageLua
+          }
+        },
+        {
+          id: 5,
+          userdataHandle: 89,
+          name: 'KeyHintControl',
+          className: 'ClientUIKeyHintControl',
+          prefabIndex: 1073741858,
+          x: 300,
+          y: 195,
+          width: 28,
+          height: 22,
+          bgColor: { r: 245, g: 245, b: 245, a: 255 },
+          text: '1',
+          fontSize: 13,
+          fontColor: { r: 24, g: 20, b: 16, a: 255 }
+        },
+        {
+          id: 6,
+          userdataHandle: 94,
+          name: 'CrossScriptHUDHint',
+          className: 'ClientUITextBoxControl',
+          prefabIndex: 1073741849,
+          x: 0,
+          y: -265,
+          width: 780,
+          height: 34,
+          bgColor: { r: 28, g: 24, b: 20, a: 210 },
+          text: "CROSS-SCRIPT ACTIVE: Click 'Press it!' or [SPACE] to Invoke('Bounce')  |  Hold [A] / [D] to Invoke('SetMoveLeft/Right')",
+          fontSize: 12,
+          fontColor: { r: 201, g: 168, b: 106, a: 255 }
+        }
+      ]
+    };
+  }
+
+  // Load and execute Lua code (or multi-script scene project)
+  run(luaCode, sceneConfig = null) {
     this.stop();
     this.resetState();
     this.setupLuaEnvironment();
@@ -2404,7 +3206,16 @@ export class MiliastraSimulator {
     this.log('⚡ Initializing Miliastra Lua Simulation', 'info');
     this.log(`Canvas Viewport: ${this.width} x ${this.height}`, 'info');
 
-    // Execute User Script
+    const resolvedScene = sceneConfig || this.buildDefaultCrossScriptBounceScene(luaCode || '');
+    if (resolvedScene) {
+      this.log('◈ Mounting Multi-Script Editor Hierarchy Scene...', 'info');
+      this.mountSceneHierarchy(resolvedScene);
+      this.lastTime = performance.now();
+      this.loop();
+      return true;
+    }
+
+    // Execute Single-File User Script
     const status = lauxlib.luaL_dostring(this.L, to_luastring(luaCode));
     if (status !== lua.LUA_OK) {
       const err = getLuaStackString(this.L, -1);
@@ -2412,17 +3223,18 @@ export class MiliastraSimulator {
       return false;
     }
 
-    // Call OnStart() if defined
-    lua.lua_getglobal(this.L, to_luastring('OnStart'));
-    if (lua.lua_isfunction(this.L, -1)) {
-      if (lua.lua_pcall(this.L, 0, 0, 0) !== lua.LUA_OK) {
-        const err = getLuaStackString(this.L, -1);
-        this.log(`[OnStart Error]: ${err}`, 'error');
+    for (const hook of ['OnInit', 'OnEnable', 'OnStart']) {
+      lua.lua_getglobal(this.L, to_luastring(hook));
+      if (lua.lua_isfunction(this.L, -1)) {
+        if (lua.lua_pcall(this.L, 0, 0, 0) !== lua.LUA_OK) {
+          const err = getLuaStackString(this.L, -1);
+          this.log(`[${hook} Error]: ${err}`, 'error');
+        } else if (hook === 'OnStart') {
+          this.log('✓ OnStart() executed successfully', 'info');
+        }
       } else {
-        this.log('✓ OnStart() executed successfully', 'info');
+        lua.lua_pop(this.L, 1);
       }
-    } else {
-      lua.lua_pop(this.L, 1);
     }
 
     // Start Game Render Loop
@@ -2436,7 +3248,6 @@ export class MiliastraSimulator {
 
     this.animationFrameId = requestAnimationFrame((now) => {
       const elapsed = now - this.lastTime;
-      // Cap 120Hz/144Hz/240Hz displays at ~60 FPS without dropping 60Hz VSync frames (which jitter between 13ms and 18ms)
       if (elapsed < 11.0) {
         this.loop();
         return;
@@ -2445,7 +3256,6 @@ export class MiliastraSimulator {
       const dt = Math.min(elapsed / 1000, 0.1);
       this.lastTime = now;
 
-      // Calculate FPS
       this.framesCount++;
       this.fpsTimer += dt;
       if (this.fpsTimer >= 0.5) {
@@ -2467,7 +3277,7 @@ export class MiliastraSimulator {
           lua.lua_pop(this.L, 1);
         }
 
-        // 2. Call OnUpdate(dt) in Lua if enabled
+        // 2. Call global OnUpdate(dt) in Lua if enabled
         if (this.updateEnabled) {
           lua.lua_getglobal(this.L, to_luastring('OnUpdate'));
           if (lua.lua_isfunction(this.L, -1)) {
@@ -2480,11 +3290,21 @@ export class MiliastraSimulator {
             lua.lua_pop(this.L, 1);
           }
         }
+
+        // 3. Call per-control mounted scripts OnUpdate(dt) / OnLevelUpdate(dt)
+        lua.lua_getglobal(this.L, to_luastring('_UpdateMountedScripts'));
+        if (lua.lua_isfunction(this.L, -1)) {
+          lua.lua_pushnumber(this.L, dt);
+          if (lua.lua_pcall(this.L, 1, 0, 0) !== lua.LUA_OK) {
+            const err = getLuaStackString(this.L, -1);
+            this.log(`[Mounted Script Update Error]: ${err}`, 'error');
+          }
+        } else {
+          lua.lua_pop(this.L, 1);
+        }
       }
 
-      // Render all controls onto the Canvas
       this.renderCanvas();
-
       this.loop();
     });
   }
@@ -2527,6 +3347,17 @@ export class MiliastraSimulator {
     const ctx = this.ctx;
     const bounds = ctrl.getScreenBounds(this.width, this.height, parentBounds);
     const canvasY = this.height - bounds.top; // Convert bottom-left to top-left for Canvas2D
+    const rotZ = ctrl.localRotationZ || 0;
+
+    if (rotZ !== 0) {
+      ctx.save();
+      const pivotCanvasX = bounds.pivotScreenX !== undefined ? bounds.pivotScreenX : (bounds.left + bounds.width / 2);
+      const pivotCanvasY = bounds.pivotScreenY !== undefined ? (this.height - bounds.pivotScreenY) : (canvasY + bounds.height / 2);
+      const scaleSign = (bounds.worldScaleX < 0 ? -1 : 1) * (bounds.worldScaleY < 0 ? -1 : 1);
+      ctx.translate(pivotCanvasX, pivotCanvasY);
+      ctx.rotate((-rotZ * scaleSign * Math.PI) / 180);
+      ctx.translate(-pivotCanvasX, -pivotCanvasY);
+    }
 
     // 1. Draw Background / Shape
     const imgCol = (ctrl.imageColor && typeof ctrl.imageColor.r === 'number') ? ctrl.imageColor : normalizeColor(ctrl.imageColor, 0);
@@ -2535,6 +3366,11 @@ export class MiliastraSimulator {
     if (bgCol.a > 0) {
       ctx.fillStyle = `rgba(${bgCol.r}, ${bgCol.g}, ${bgCol.b}, ${bgCol.a / 255})`;
       ctx.fillRect(bounds.left, canvasY, bounds.width, bounds.height);
+      if (ctrl.className === 'ClientUIPresetButtonControl' || ctrl.raycastTarget) {
+        ctx.strokeStyle = 'rgba(196, 160, 89, 0.65)';
+        ctx.lineWidth = 1.5;
+        ctx.strokeRect(bounds.left + 0.5, canvasY + 0.5, Math.max(0, bounds.width - 1), Math.max(0, bounds.height - 1));
+      }
     }
 
     if (imgCol.a > 0) {
@@ -2671,7 +3507,8 @@ export class MiliastraSimulator {
       ctx.save();
       const fCol = normalizeColor(ctrl.fontColor, 255);
       ctx.fillStyle = `rgba(${fCol.r}, ${fCol.g}, ${fCol.b}, ${fCol.a / 255})`;
-      const fontSize = ctrl.fontSize || 14;
+      const scaleFactor = Math.min(Math.abs(bounds.worldScaleX || 1), Math.abs(bounds.worldScaleY || 1));
+      const fontSize = Math.max(6, (ctrl.fontSize || 14) * scaleFactor);
       ctx.font = `${fontSize}px "JetBrains Mono", "Segoe UI Symbol", "Apple Color Emoji", sans-serif`;
 
       let textX = bounds.left;
@@ -2697,6 +3534,10 @@ export class MiliastraSimulator {
       for (const child of ctrl.children) {
         this.renderControlNode(child, bounds);
       }
+    }
+
+    if (rotZ !== 0) {
+      ctx.restore();
     }
   }
 

@@ -42,7 +42,7 @@ function getAspectRatioString(w, h) {
   return `${(w / h).toFixed(2)}:1`;
 }
 
-export function openLuaRunnerModal(luaCode, scriptTitle = 'Miliastra Lua Simulation', getLatestCodeFn = null) {
+export function openLuaRunnerModal(luaCode, scriptTitle = 'Miliastra Lua Simulation', getLatestCodeFn = null, sceneConfig = null) {
   closeLuaRunnerModal();
 
   let currentCode = luaCode;
@@ -260,8 +260,9 @@ export function openLuaRunnerModal(luaCode, scriptTitle = 'Miliastra Lua Simulat
       activeSimulator.destroy();
       activeSimulator = null;
     }
+    const resolvedScene = typeof sceneConfig === 'function' ? sceneConfig() : sceneConfig;
     activeSimulator = new MiliastraSimulator(canvas, appendLog, simWidth, simHeight);
-    activeSimulator.run(codeToRun);
+    activeSimulator.run(codeToRun, resolvedScene);
     updateStatusDisplay();
     if (canvas) canvas.focus();
   };

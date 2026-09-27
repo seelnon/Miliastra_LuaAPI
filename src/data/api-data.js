@@ -18,7 +18,7 @@ export const API_CLASSES = [
       { name: "prefabIndex", type: "number", access: "Read", desc: "The template index of the Client Control." },
       { name: "active", type: "boolean", access: "Read", desc: "Whether the Client Control is active. While active, attached scripts will call lifecycle functions." },
       { name: "activeInHierarchy", type: "boolean", access: "Read", desc: "Whether the Client Control is active, factoring in the active states of its parent hierarchy." },
-      { name: "visible", type: "boolean", access: "Read/Write", desc: "Whether the Client Control is visible.", example: "cell:SetVisible(true)\n-- or direct property:\ncell.visible = true" },
+      { name: "visible", type: "boolean", access: "Read", desc: "Whether the Client Control is visible. Use control:SetVisible(visible) to change visibility.", example: "local isVis = cell.visible\ncell:SetVisible(true)" },
       { name: "name", type: "string", access: "Read/Write", desc: "The name of the Client Control." },
       { name: "parent", type: "ClientControlType?", access: "Read/Write", desc: "The parent of the Client Control. Always nil for root-level ControlContainers." },
       { name: "anchoredPositionX", type: "number", access: "Read/Write/Tweenable", desc: "The x position of the Client Control's pivot point relative to its anchor point.", example: "control.anchoredPositionX = (column - 1) * CELL_SIZE" },
@@ -182,6 +182,40 @@ export const API_CLASSES = [
         params: [],
         returns: "void",
         desc: "Removes all controller navigation event listeners."
+      },
+      {
+        name: "RemoveKeyEventListener",
+        signature: "control:RemoveKeyEventListener(eventType, callback)",
+        params: [
+          { name: "eventType", type: "EnumItem.KeyEventType", desc: "The event type to remove the callback from." },
+          { name: "callback", type: "fun(): boolean", desc: "The callback function to remove." }
+        ],
+        returns: "void",
+        desc: "Removes the specified key event listener from the Client Control."
+      },
+      {
+        name: "RemoveKeyEventListeners",
+        signature: "control:RemoveKeyEventListeners(eventType)",
+        params: [{ name: "eventType", type: "EnumItem.KeyEventType", desc: "The event type to clear listeners from." }],
+        returns: "void",
+        desc: "Removes all key event listeners for the specified event type from the Client Control."
+      },
+      {
+        name: "RemoveNavigationEventListener",
+        signature: "control:RemoveNavigationEventListener(eventType, callback)",
+        params: [
+          { name: "eventType", type: "EnumItem.ControllerNavigationEventType", desc: "The event type to remove the callback from." },
+          { name: "callback", type: "fun()", desc: "The callback function to remove." }
+        ],
+        returns: "void",
+        desc: "Removes the specified controller navigation event listener from the Client Control."
+      },
+      {
+        name: "RemoveNavigationEventListeners",
+        signature: "control:RemoveNavigationEventListeners(eventType)",
+        params: [{ name: "eventType", type: "EnumItem.ControllerNavigationEventType", desc: "The event type to clear listeners from." }],
+        returns: "void",
+        desc: "Removes all controller navigation listeners for the specified event type from the Client Control."
       },
       {
         name: "SetActive",
@@ -633,6 +667,30 @@ export const API_CLASSES = [
         ],
         returns: "void",
         desc: "Registers a cursor event listener."
+      },
+      {
+        name: "RemoveCursorEventListener",
+        signature: "area:RemoveCursorEventListener(eventType, callback)",
+        params: [
+          { name: "eventType", type: "EnumItem.CursorEventType", desc: "Event type to remove." },
+          { name: "callback", type: "fun(eventData: CursorEventData)", desc: "Callback function to remove." }
+        ],
+        returns: "void",
+        desc: "Removes the specified cursor event listener."
+      },
+      {
+        name: "RemoveCursorEventListeners",
+        signature: "area:RemoveCursorEventListeners(eventType)",
+        params: [{ name: "eventType", type: "EnumItem.CursorEventType", desc: "Event type to clear." }],
+        returns: "void",
+        desc: "Removes all cursor event listeners for the specified event type."
+      },
+      {
+        name: "RemoveAllCursorEventListeners",
+        signature: "area:RemoveAllCursorEventListeners()",
+        params: [],
+        returns: "void",
+        desc: "Removes all cursor event listeners from the CursorEventArea."
       },
       {
         name: "SimulateCursorClick",

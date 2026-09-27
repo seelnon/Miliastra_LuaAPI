@@ -15,8 +15,9 @@ import {
   copyToClipboard,
   showToast
 } from './ui-components.js';
-import { renderScratchpad } from './scratchpad.js';
-import { renderMarkdown } from './markdown-renderer.js';
+import { renderScratchpad, getScratchpadSnippets } from './scratchpad.js';
+import { renderProjectsView, destroyInlineProjectSimulator } from './projects-view.js';
+import { renderGuidesView } from './guides-view.js';
 import { openLuaRunnerModal } from './lua-runner-modal.js';
 
 class MiliastraCodexApp {
@@ -33,7 +34,7 @@ class MiliastraCodexApp {
     this.handleRoute();
 
     // Asynchronously fetch fresh .lua files via static fetch()
-    getLuaExamples().then(() => {
+    Promise.all([getLuaExamples(), getScratchpadSnippets()]).then(() => {
       this.searchEngine.buildIndex();
       this.performSearch();
       if (this.selectedItem && this.selectedItem.type === 'example') {
@@ -72,7 +73,8 @@ class MiliastraCodexApp {
         <button class="nav-tab" data-tab="enums">2. ENUMS & KEYBINDS</button>
         <button class="nav-tab" data-tab="examples">3. CODE EXAMPLES</button>
         <button class="nav-tab" data-tab="scratchpad">4. SCRATCHPAD</button>
-        <button class="nav-tab" data-tab="ledger">5. MARKDOWN GUIDE</button>
+        <button class="nav-tab" data-tab="ledger">5. PROJECTS & HIERARCHY</button>
+        <button class="nav-tab" data-tab="guides">6. EXPLANATIONS & GUIDES</button>
       </nav>
 
       <div class="codex-body">
@@ -110,6 +112,16 @@ class MiliastraCodexApp {
     this.searchInput = document.getElementById('search-input');
     this.itemsList = document.getElementById('items-list');
     this.mainContent = document.getElementById('main-content');
+    this.codexBody = document.querySelector('.codex-body');
+  }
+
+  syncWorkspaceLayout() {
+    if (this.codexBody) {
+      this.codexBody.classList.toggle(
+        'full-width-mode',
+        this.currentTab === 'ledger' || this.currentTab === 'scratchpad'
+      );
+    }
   }
 
   bindEvents() {
@@ -374,8 +386,12 @@ class MiliastraCodexApp {
   }
 
   switchTab(tabName, customData = null) {
+    if (this.currentTab === 'ledger' && tabName !== 'ledger') {
+      destroyInlineProjectSimulator();
+    }
     this.currentTab = tabName;
     this.setNavTab(tabName);
+    this.syncWorkspaceLayout();
 
     if (tabName !== 'api') {
       this.currentRenderedClassId = null;
@@ -396,6 +412,8 @@ class MiliastraCodexApp {
       renderScratchpad(this.mainContent, customData);
     } else if (tabName === 'ledger') {
       this.renderLedgerGuideView();
+    } else if (tabName === 'guides') {
+      this.renderGuidesTabView();
     }
   }
 
@@ -425,6 +443,10 @@ class MiliastraCodexApp {
       this.switchTab('ledger');
       return;
     }
+    if (hash === 'guides') {
+      this.switchTab('guides');
+      return;
+    }
 
     const item = this.searchEngine.index.find(i => i.id === hash || i.targetId === hash);
     if (item) {
@@ -441,6 +463,7 @@ class MiliastraCodexApp {
         this.setNavTab('api');
       }
       this.selectedItem = item;
+      this.syncWorkspaceLayout();
       this.renderList();
       this.renderDetail(item);
     } else {
@@ -634,61 +657,15 @@ class MiliastraCodexApp {
   }
 
   renderLedgerGuideView() {
-    const sampleMarkdown = `
-# Miliastra Lua 5.1 Architecture Guide
-The Miliastra Wonderland Lua scripting engine is designed for high-performance UI rendering and frame-rate responsiveness. All controls, tween lifecycles, and network events obey deterministic execution standards.
+    renderProjectsView(this.mainContent, (code) => {
+      this.switchTab('scratchpad', code);
+    });
+  }
 
-## Core Best Practices
-- [x] Cache control references in \`OnInit\` or \`OnStart\` using \`script.object\`
-- [x] Attach key and cursor event listeners and return \`true\` to consume events
-- [x] Sequence complex animations using \`game.TweenSequence()\`
-- [ ] Connect custom variables to Server Node Graphs for multiplayer synchronization
-
-## Essential Control Types
-1. \`ClientUIBaseControl\`: Root ancestor of all visual and interactive components.
-2. \`ClientUIImageControl\`: Texture rendering, radial cooldown fills, and soft-edge shaders.
-3. \`ClientUITextBoxControl\`: High-contrast typography with adaptive font sizing and outlines.
-4. \`ClientUIGridScrollerControl\`: Virtualized list scrolling and item recycling.
-
-## Sample Animation Sequence
-\`\`\`lua
----@meta
--- Smooth scale & position bounce for ImageControl
-function OnStart()
-    local image = script.object
-    local seq = game.TweenSequence()
-
-    seq:Append(game.Tween(image, {
-        anchoredPositionY = 120,
-        localScaleX = 0.9,
-        localScaleY = 1.1
-    }, 0.35):SetEase(Enum.EaseType.OutQuad))
-
-    seq:Append(game.Tween(image, {
-        anchoredPositionY = 0,
-        localScaleX = 1.0,
-        localScaleY = 1.0
-    }, 0.25):SetEase(Enum.EaseType.InQuad))
-
-    seq:Play()
-end
-\`\`\`
-
-## Quick Navigation Links
-[ Explore All Enums ](#enums) | [ Open Scratchpad ](#scratchpad) | [ Inspect Chess Engine ](#example:chess_test)
-
-## Performance Metrics Table
-| CONTROL TYPE | DRAW CALL COST | TYPICAL MEMORY | TWEENABLE |
-| :--- | :--- | :--- | :--- |
-| ClientUIImageControl | 1 Mesh Batch | ~1.2 KB | Yes |
-| ClientUITextBoxControl | Text Atlas Cache | ~2.4 KB | Yes |
-| ClientUIGridScrollerControl | Dynamic Recycle | ~4.8 KB | Yes |
-
-## Architecture Notes
-> "Always detach event listeners in OnDisable or OnDestroy to prevent reference leaks during level transitions."
-`;
-
-    this.mainContent.innerHTML = renderMarkdown(sampleMarkdown);
+  renderGuidesTabView() {
+    renderGuidesView(this.mainContent, (code) => {
+      this.switchTab('scratchpad', code);
+    });
   }
 }
 
