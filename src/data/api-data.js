@@ -739,11 +739,12 @@ export const API_CLASSES = [
     category: "Controls",
     badge: "Class",
     inherits: "ClientUIBaseControl",
-    description: "Displays context-sensitive controller or keyboard button prompts and keybind glyphs.",
+    description: "Dynamic button/key prompt control that automatically queries the player's live in-game keybind settings and displays their actual bound Keyboard keycap or Gamepad button glyph.",
+    notes: "⚡ CRITICAL RULE — NEVER USE STATIC TEXT FOR KEYBINDS: If a stage creator writes 'Press R to Reload' inside a TextBoxControl because they have Craftsperson Key 7 bound to 'R', any player who remapped that action to '[' in their Game Settings (or plays on a Gamepad) sees a broken prompt! Always use ClientUIKeyHintControl (1073741858) so the badge automatically reflects the player's actual bound key ('R', '[', or Gamepad button) and pair it with the matching semantic Enum.KeyEventType (164 total events: 58 Keyboard actions × Up/Down + 24 Controller buttons × Up/Down).",
     file: "library/client_controls/KeyHintControl.d.lua",
     fields: [
-      { name: "keyboardKeyCode", type: "EnumItem.KeyboardKeyCode", access: "Read/Write", desc: "Key hint for keyboard & mouse input." },
-      { name: "controllerKeyCode", type: "EnumItem.ControllerKeyCode", access: "Read/Write", desc: "Key hint for controller input." }
+      { name: "keyboardKeyCode", type: "EnumItem.KeyboardKeyCode", access: "Read/Write", desc: "Semantic PC Keyboard/Mouse action slot (59 items in Enum.KeyboardKeyCode: Invalid=0 + 58 actions 1..58). Automatically renders the actual keycap the player has bound to this action in their settings (e.g., if KeyboardCraftspersonKey7 default 'R' was rebound to '[', displays '['). Pairs 1:1 with Enum.KeyEventType.Keyboard*KeyUp (1..58) and Keyboard*KeyDown (301..358)." },
+      { name: "controllerKeyCode", type: "EnumItem.ControllerKeyCode", access: "Read/Write", desc: "Gamepad button or combo slot (25 items in Enum.ControllerKeyCode: Invalid=0 + 24 buttons/combos 1..24: Action Bottom, Action Right, Action Left, Action Top, D-Pad Up/Down/Left/Right, Left/Right Stick Press, LB, RB, LT, RT, LB + Action Top/Bottom/Left/Right, LB + D-Pad Up/Down/Left/Right, LB + RB, LT + RT). Pairs 1:1 with Enum.KeyEventType.Controller*KeyUp (100..123) and Controller*KeyDown (400..423)." }
     ],
     methods: []
   },

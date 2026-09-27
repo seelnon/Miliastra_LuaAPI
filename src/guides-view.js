@@ -179,6 +179,60 @@ function CreateStyledButton(parent, x, y, w, h, labelText, onClick)
     return bgLabel, hitBtn
 end`;
 
+const GUIDE_KEYHINT_DYNAMIC_BIND_CODE = `---@meta
+-- ============================================================================
+-- MILIASTRA UI RULE: NEVER hardcode static key names like "Press R" in TextBox!
+-- WHY: If the stage author has Craftsperson Key 7 bound to 'R', but a player
+-- remapped that action to '[' in their Game Settings (or plays on a Gamepad
+-- with LB + Action Top), static text ("Press R to Reload") lies to the player!
+--
+-- SOLUTION: Pair a ClientUIKeyHintControl (1073741858) with a label TextBox.
+--   • KeyHintControl automatically queries the player's live keybind table and
+--     renders their actual bound keycap ('R', '[', etc.) or Gamepad glyph!
+--   • Enum.KeyboardKeyCode (59 items: Invalid=0 + 58 semantic PC actions 1..58)
+--   • Enum.ControllerKeyCode (25 items: Invalid=0 + 24 Gamepad buttons/combos 1..24)
+--   • Enum.KeyEventType (164 items: 58 Keyboard Up/Down + 24 Controller Up/Down)
+-- ============================================================================
+
+local keyHintBadge = nil
+local actionLabel = nil
+
+function OnStart()
+    local root = script.object
+
+    -- 1. Grab the KeyHintControl & companion TextBox (contains only the action verb!)
+    keyHintBadge = root:FindChild("KeyHintControl")
+    actionLabel  = root:FindChild("ActionVerbLabel")
+
+    if keyHintBadge then
+        -- Bind semantic slot: Craftsperson Key 7 (Default 'R' on PC, or whatever key
+        -- the player rebound it to, e.g. '[') + LB + Action Top on Gamepad:
+        keyHintBadge.keyboardKeyCode   = Enum.KeyboardKeyCode.KeyboardCraftspersonKey7
+        keyHintBadge.controllerKeyCode = Enum.ControllerKeyCode.ControllerComboAction4
+    end
+
+    if actionLabel then
+        -- Notice we DO NOT write "Press R to Activate Mechanism" here!
+        -- The KeyHintControl badge beside this label shows 'R' or '[' or 'LB + ▲' dynamically.
+        actionLabel.text = "Activate Mechanism"
+    end
+
+    -- 2. Listen to the matching semantic KeyEventType for BOTH Keyboard & Controller:
+    game.AddKeyEventListener(
+        Enum.KeyEventType.KeyboardCraftspersonKey7KeyDown,
+        function()
+            print("[Input] Triggered via player's bound PC key (even if rebound to '[')!")
+        end
+    )
+
+    game.AddKeyEventListener(
+        Enum.KeyEventType.ControllerComboAction4KeyDown,
+        function()
+            print("[Input] Triggered via Gamepad (LB + Action Top)!")
+        end
+    )
+end`;
+
 export function renderGuidesView(container, onOpenInScratchpad = null) {
   container.innerHTML = `
     <div class="doc-hero">
@@ -285,6 +339,15 @@ export function renderGuidesView(container, onOpenInScratchpad = null) {
           • To pause <code>OnUpdate</code> from inside, call <strong><code>script:EnableUpdate(false)</code></strong>.
         </div>
       </div>
+
+      <div class="matrix-card" style="cursor: default; border-color: var(--border-gold-bright);">
+        <div class="card-name">5. Why KeyHintControl Is Mandatory (Never Hardcode "Press R"!)</div>
+        <div class="card-val">ClientUIKeyHintControl + Enum.KeyEventType (164 Events)</div>
+        <div class="card-desc">
+          <strong>The Static Text Trap:</strong> If a stage creator writes <code>"Press R to Reload"</code> inside a <code>TextBoxControl</code> because they have <em>Craftsperson Key 7</em> bound to <code>R</code>, any player who remapped that slot to <strong><code>'['</code></strong> in their Game Settings (or plays on a Gamepad) sees a broken prompt that doesn't match their controls!<br><br>
+          <strong>The Solution:</strong> Always use <strong><code>ClientUIKeyHintControl</code></strong> (<code>1073741858</code>) for key/button prompts! It queries the player's live keybind table and automatically renders their actual bound keycap (e.g. <code>[</code> instead of <code>R</code>) on PC via <code>Enum.KeyboardKeyCode</code> (59 items) or their Gamepad button via <code>Enum.ControllerKeyCode</code> (25 items), pairing 1:1 with <code>Enum.KeyEventType</code> (164 total events: 116 Keyboard + 48 Controller).
+        </div>
+      </div>
     </div>
 
     <!-- SECTION 3: COMPARISON TABLE OF ALL ID TYPES -->
@@ -376,7 +439,7 @@ export function renderGuidesView(container, onOpenInScratchpad = null) {
       </div>
     </div>
 
-    <div class="code-block-wrapper" style="margin-bottom: 24px;">
+    <div class="code-block-wrapper" style="margin-bottom: 18px;">
       <div class="code-block-header">
         <span class="code-block-title">RECIPE C: BUTTON BACKGROUND WORKAROUND (TEXTBOX bgColor + PRESETBUTTON HITBOX)</span>
         <div style="display: flex; gap: 6px;">
@@ -386,6 +449,19 @@ export function renderGuidesView(container, onOpenInScratchpad = null) {
       </div>
       <div class="code-container">
         <pre>${highlightLua(GUIDE_BUTTON_BG_WORKAROUND_CODE, true)}</pre>
+      </div>
+    </div>
+
+    <div class="code-block-wrapper" style="margin-bottom: 24px;">
+      <div class="code-block-header">
+        <span class="code-block-title">RECIPE D: DYNAMIC KEYBIND SHOWCASE (KEYHINTCONTROL VS. STATIC "PRESS R" TRAP)</span>
+        <div style="display: flex; gap: 6px;">
+          <button class="brutal-btn guide-open-scratchpad-btn" data-code="${encodeURIComponent(GUIDE_KEYHINT_DYNAMIC_BIND_CODE)}" style="padding: 2px 8px; font-size: 10px;">[ OPEN IN SCRATCHPAD ]</button>
+          <button class="brutal-btn guide-copy-btn" data-code="${encodeURIComponent(GUIDE_KEYHINT_DYNAMIC_BIND_CODE)}" style="padding: 2px 8px; font-size: 10px;">[ COPY LUA ]</button>
+        </div>
+      </div>
+      <div class="code-container">
+        <pre>${highlightLua(GUIDE_KEYHINT_DYNAMIC_BIND_CODE, true)}</pre>
       </div>
     </div>
   `;

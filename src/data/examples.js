@@ -69,30 +69,30 @@ export const exampleDefinitions = [
     category: "Game Systems",
     tags: ["Playable Game", "Tetris", "Cursor Aim", "Physics Particles", "Screen Shake", "Input Events"],
     description: "An arcade puzzle shooter combining Tetris piece falling and cursor-aimed block shooting. Features screen shake, line-clearing particle explosions, panic countdown bar, and CW/CCW piece rotation."
-  },  
+  },
   {
     id: "realm_mad_mage",
-    title: "Realm of the Mad Mage: Endless Bullet-Hell ARPG (realm_mad_mage.lua)",
+    title: "Procedural Bullet-Hell ARPG (realm_mad_mage.lua)",
     filename: "lua_examples/realm_mad_mage.lua",
     category: "Game Systems",
-    tags: ["Playable Game", "RotMG Bullet-Hell", "Endless Procedural Map", "Wizard Spellbomb", "Loot Bags", "Boss Spawn"],
-    description: "An endless procedurally generated bullet-hell ARPG inspired by Realm of the Mad God. Roam infinite grasslands, brick roads, and projectile-blocking forest trees as a Wizard firing twin arcane staff bolts and cursor-targeted Spellbomb Novas. Slay Goblin Archers, Shadow Bats, splitting Obsidian Bomb Orbs, and Pyromancers to collect Loot Bags, fill the Fame Score bar, and summon Oryx the Mad Archon!"
+    tags: ["Playable Game", "Bullet-Hell", "Endless Procedural Map", "Wizard Spellbomb", "Loot Bags", "Boss Spawn"],
+    description: "Infinite grasslands, brick roads, and projectile-blocking forest trees as a Wizard firing twin arcane staff bolts and cursor-targeted Spellbomb Novas."
   },
   {
     id: "platform_fighter",
-    title: "Detached-Limb Platform Fighter: Brawlhalla / SSBM (fighter.lua)",
+    title: "Platform Fighter (fighter.lua)",
     filename: "lua_examples/fighter.lua",
     category: "Game Systems",
     tags: ["Playable Game", "Platform Fighter", "Detached Limbs", "Weapon Swings", "Juggling & Bounce %", "Chain Ledge Grapple"],
-    description: "A fast-paced Brawlhalla / SSBM platform fighter featuring side-profile characters with detached floating limbs, directional weapon swings (Side Slash, Up-Juggle Launcher, Down-Air Meteor Spike, Heavy Smash), Damage % elastic bounce buildup, and an 8-link segmented grapple chain for off-stage ledge recovery."
+    description: "A fast-paced Brawlhalla / SSBM platform fighter, directional weapon swings (Side Slash, Up-Juggle Launcher, Down-Air Meteor Spike, Heavy Smash), Damage % elastic bounce buildup, and an 8-link segmented grapple chain for off-stage ledge recovery."
   },
   {
     id: "north_racer",
-    title: "Northbound Drift Racer (gta2_north_racer.lua)",
-    filename: "lua_examples/gta2_north_racer.lua",
+    title: "Northbound Drift Racer (north_racer.lua)",
+    filename: "lua_examples/north_racer.lua",
     category: "Game Systems",
-    tags: ["Playable Game", "GTA2 Top-Down", "Procedural Road", "Powersliding", "Drift Physics", "Pace Notes", "Object Pooling"],
-    description: "A 2D top-down GTA2-style northbound highway racer with procedural road & chicane generation, rally pace-note lookahead callouts for upcoming corners, local-frame tire grip & handbrake powersliding physics, dual rear-wheel skidmarks, tire smoke particles, and drift combo scoring."
+    tags: ["Playable Game", "Top-Down", "Procedural Road", "Powersliding", "Drift Physics", "Pace Notes", "Object Pooling"],
+    description: "A 2D top-down northbound highway racer with procedural road, rally pace-note lookahead callouts for upcoming corners, local-frame tire grip & handbrake powersliding physics, dual rear-wheel skidmarks, tire smoke particles, and drift combo scoring."
   },
   {
     id: "platformer_1_1",

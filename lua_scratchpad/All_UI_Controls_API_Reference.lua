@@ -86,9 +86,28 @@
 --        - E (Elemental Skill) : `KeyboardCharacterSkill1KeyDown` / `Up`
 --        - Q (Elemental Burst) : `KeyboardCharacterSkill2KeyDown` / `Up`
 --        - R (Aim / Skill 3)   : `KeyboardCharacterSkill3KeyDown` / `Up`
---        - F (Interact)        : `KeyboardInteractiveKeyDown` / `Up`
+--        - T (Skill 4)         : `KeyboardCharacterSkill4KeyDown` / `Up`
+--        - F (Interact)        : `KeyboardInteractKeyDown` / `Up`
 --
--- 8. VIEWPORT CENTERING STRATEGIES (BOTH VERIFIED IN GENSHIN):
+-- 8. WHY `ClientUIKeyHintControl` IS MANDATORY FOR KEY PROMPTS (NEVER HARDCODE "PRESS R" IN TEXT!):
+--    * All 164 `Enum.KeyEventType` events (58 Keyboard actions × 2 Down/Up = 116 + 24 Controller
+--      actions × 2 Down/Up = 48) are connected to the **player's semantic in-game keybinds**!
+--    * THE STATIC TEXT TRAP:
+--      - Suppose your stage listens for `Enum.KeyEventType.KeyboardCharacterSkill3KeyDown` (default `R`).
+--      - If you write a static `TextBoxControl` saying `"Press R to Reload"`, any player who remapped
+--        Skill 3 (`R`) to another key (e.g., `[` or `Mouse 4`) or plays on a Gamepad (`D-pad Up`)
+--        will see the wrong key and think your game is broken!
+--      - Worse still: if the stage creator themselves rebound `R` to `[` in their own game settings
+--        and wrote static text `"Press ["`, every player with default settings has to press `R`!
+--    * THE SOLUTION (`ClientUIKeyHintControl`):
+--      - Always display a `ClientUIKeyHintControl` badge alongside your action text!
+--      - Set `keyHint.keyboardKeyCode = Enum.KeyboardKeyCode.CharacterSkill3Key` (59 total items:
+--        58 semantic PC keys + `None`) and `keyHint.controllerKeyCode = Enum.ControllerKeyCode.CharacterSkill3Key`
+--        (25 total items: 24 semantic Gamepad buttons/combos + `None`).
+--      - `KeyHintControl` queries the client's live keybind settings and renders the exact keycap or
+--        gamepad button (or `LB + ...` combo) that specific player has bound!
+--
+-- 9. VIEWPORT CENTERING STRATEGIES (BOTH VERIFIED IN GENSHIN):
 --    * Strategy A (Centered Fit-to-View Root Container via `SetLocalScale`):
 --      - Anchor `root` (`script.object`) at center `(0.5, 0.5)` with `SetPivot(0.5, 0.5)`,
 --        `SetAnchoredPosition(0, 0)`, `SetSizeDelta(DESIGN_W, DESIGN_H)`, and scale uniformly
@@ -367,8 +386,11 @@ function OnStart()
     -- TYPE 4: ClientUITextWindowControl (Scrollable Multi-Line Text Box)
     -- Source: library/client_controls/TextWindowControl.d.lua
     -- Inherits: ClientUIBaseControl
-    -- NOTE: Same fields as TextBoxControl PLUS .interactable and .showScrollBar!
-    --       Has NO .raycastTarget and NO :AddCursorEventListener!
+    -- Editor Inspector ("Text Box Settings"):
+    --   * Identical to TextBoxControl, PLUS 2 toggles at the top:
+    --     1. "Can Scroll"     -> .interactable (boolean) — allows vertical scrolling of long text
+    --     2. "Show Scrollbar" -> .showScrollBar (boolean) — renders the vertical scrollbar on the right edge
+    --   * Has NO .raycastTarget and NO :AddCursorEventListener!
     -- ------------------------------------------------------------------------
     local textWinCtrl = game.InstantiateClientUIControl(TEMPLATE_TEXT_WINDOW, containerCtrl)
     textWinCtrl.name = "TextWindowControlSpec"
@@ -454,9 +476,13 @@ function OnStart()
     -- TYPE 6: ClientUICursorEventAreaControl (Invisible Hitbox / Drag Surface)
     -- Source: library/client_controls/CursorEventAreaControl.d.lua
     -- Inherits: ClientUIBaseControl
+    -- Editor Inspector ("Click Response Area"):
+    --   1. "Persistent Area Preview" (Editor-only visual toggle for hitbox layout)
+    --   2. "Raycast Target"          (.raycastTarget boolean)
     -- NOTE: Has .raycastTarget, :AddCursorEventListener, :RemoveCursorEventListener,
     --       :RemoveCursorEventListeners, :RemoveAllCursorEventListeners, :SimulateCursorClick.
     --       Does NOT have .interactable, .clickAudioId, .bgColor, or .imageColor!
+    --       Useful for map click/raycast minigames (though a fullscreen PresetButton also works).
     -- ------------------------------------------------------------------------
     local cursorAreaLabel = game.InstantiateClientUIControl(TEMPLATE_TEXTBOX, containerCtrl)
     cursorAreaLabel:SetAnchorMin(0.5, 0.5)
@@ -497,6 +523,24 @@ function OnStart()
     -- TYPE 7: ClientUIGridScrollerControl (Recycled Virtualized Grid/List)
     -- Source: library/client_controls/GridScrollerControl.d.lua
     -- Inherits: ClientUIBaseControl
+    --
+    -- Editor Inspector ("Grid List" — [img-1], [img-2]):
+    --   1. Scroll Direction:
+    --        - "Horizontal" (Enum.ScrollDirection.Horizontal = 0)
+    --        - "Vertical"   (Enum.ScrollDirection.Vertical   = 1)
+    --   2. Layout Constraint:
+    --        - "Auto Wrap"  (Enum.ScrollLayoutConstraint.AutoWrap = 0) — wraps cells based on box size
+    --        - "Fixed"      (Enum.ScrollLayoutConstraint.Fixed    = 1) — locks cross-axis count:
+    --            * When Scroll Direction = "Horizontal", Fixed count is labeled "Rows"
+    --            * When Scroll Direction = "Vertical",   Fixed count is labeled "Columns"
+    --   3. Content (Single Template Slot — `.itemPrefabIndex`):
+    --        - Inserting a template fills the grid with repeating copies of that 1 cell prefab.
+    --        - Why only 1 template? For Minecraft/Terraria-style inventories, you design ONE
+    --          universal "Item Slot" template (e.g. Border + Icon Image + Stack Count Text +
+    --          invisible Button hitbox), then call `:RefreshItems(slotCount, function(itemCtrl, index) ... end)`
+    --          in Lua. The callback fires for each slot (0-based `index`), letting you customize
+    --          that slot's icon/text/color and bind a click listener that queries
+    --          `gridScroller:GetItemIndex(itemCtrl)`!
     -- ------------------------------------------------------------------------
     local gridScroller = game.InstantiateClientUIControl(TEMPLATE_GRID_SCROLLER, containerCtrl)
     gridScroller.name = "GridScrollerSpec"
@@ -533,46 +577,117 @@ function OnStart()
     gridScroller:ScrollToItemAt(0, Enum.ScrollAlignType.Top)
 
     -- ------------------------------------------------------------------------
-    -- TYPE 8: ClientUIAnimationControl (Framed UI Animation Component)
+    -- TYPE 8: ClientUIAnimationControl (Localized Particle / Cursor Area VFX)
     -- Source: library/client_controls/AnimationControl.d.lua
     -- Inherits: ClientUIBaseControl
+    --
+    -- Editor Inspector ("UI Animation Settings" -> Detached "Select VFX" Side Panel):
+    --   * Features small localized particle effects around the control / cursor area
+    --     (IDs 10001001 to 10001160).
+    --   * Layer (Enum.UIAnimationLayer):
+    --       - Enum.UIAnimationLayer.AboveAllControls (1)
+    --       - Enum.UIAnimationLayer.BelowAllControls (0)
+    --   * Looping Particle Effects (62 IDs — stay active until :StopAnimation() or :SetActive(false)):
+    --       10001001, 10001002, 10001003, 10001004, 10001005, 10001006, 10001007, 10001010, 10001011, 10001012, 10001013,
+    --       10001014, 10001015, 10001016, 10001017, 10001018, 10001019, 10001020, 10001021, 10001022, 10001023,
+    --       10001024, 10001025, 10001026, 10001027, 10001028, 10001029, 10001030, 10001035, 10001037, 10001038, 10001041,
+    --       10001042, 10001051, 10001053, 10001056, 10001060, 10001063, 10001067, 10001069, 10001070, 10001071, 10001072,
+    --       10001075, 10001080, 10001081, 10001082, 10001092, 10001106, 10001114, 10001116, 10001118, 10001119, 10001131,
+    --       10001132, 10001147, 10001149, 10001152, 10001154, 10001157, 10001158, 10001159
+    --   * Non-Looping Particle Effects (98 IDs — play 1-shot burst and automatically disappear):
+    --       10001008, 10001009, 10001031, 10001032, 10001033, 10001034, 10001036, 10001039, 10001040, 10001043, 10001044,
+    --       10001045, 10001046, 10001047, 10001048, 10001049, 10001050, 10001052, 10001054, 10001055, 10001057, 10001058, 10001059,
+    --       10001061, 10001062, 10001064, 10001065, 10001066, 10001068, 10001073, 10001074, 10001076, 10001077, 10001078,
+    --       10001079, 10001083, 10001084, 10001085, 10001086, 10001087, 10001088, 10001089, 10001090, 10001091, 10001093,
+    --       10001094, 10001095, 10001096, 10001097, 10001098, 10001099, 10001100, 10001101, 10001102, 10001103, 10001104, 10001105,
+    --       10001107, 10001108, 10001109, 10001110, 10001111, 10001112, 10001113, 10001115, 10001117, 10001120, 10001121, 10001122,
+    --       10001123, 10001124, 10001125, 10001126, 10001127, 10001128, 10001129, 10001130, 10001133, 10001134, 10001135, 10001136,
+    --       10001137, 10001138, 10001139, 10001140, 10001141, 10001142, 10001143, 10001144, 10001145, 10001146, 10001148,
+    --       10001150, 10001151, 10001153, 10001155, 10001156, 10001160
     -- ------------------------------------------------------------------------
     local animCtrl = game.InstantiateClientUIControl(TEMPLATE_ANIMATION, containerCtrl)
     animCtrl.name = "AnimationControlSpec"
-    animCtrl.animationId     = 2001                                   -- integer [Read/Write]
+    animCtrl.animationId     = 10001001                               -- integer [Read/Write] (UI Particle Effect 1 — Looping)
     animCtrl.playSoundEffect = true                                   -- boolean [Read/Write]
     animCtrl.layer           = Enum.UIAnimationLayer.AboveAllControls -- EnumItem.UIAnimationLayer [Read/Write]
     animCtrl:PlayAnimation()
     animCtrl:StopAnimation()
 
     -- ------------------------------------------------------------------------
-    -- TYPE 9: ClientUIFullscreenAnimationControl (Fullscreen Cinematic Animation)
+    -- TYPE 9: ClientUIFullscreenAnimationControl (Fullscreen Cinematic VFX)
     -- Source: library/client_controls/FullscreenAnimationControl.d.lua
-    -- Inherits: ClientUIBaseControl (0 subclass methods)
+    -- Inherits: ClientUIBaseControl (0 subclass methods; auto-plays when active
+    --           or when a new .animationId is assigned!)
+    --
+    -- Editor Inspector ("UI Animation Settings" -> "Select VFX"):
+    --   * Looping Effects (23 IDs — Corner Bokeh / Vignette Dimming "View Ambience"):
+    --       10002001, 10002002, 10002003, 10002004, 10002005,
+    --       10002009, 10002014, 10002015, 10002018, 10002020,
+    --       10002021, 10002022, 10002023, 10002025, 10002026,
+    --       10002027, 10002028, 10002029, 10002032, 10002034,
+    --       10002035, 10002036, 10002037
+    --   * Non-Looping Effects (14 IDs — 1–2s One-Shot Screen Glitch / Impact Burst):
+    --       10002006, 10002007, 10002008, 10002010, 10002011,
+    --       10002012, 10002013, 10002016, 10002017, 10002019,
+    --       10002024, 10002030, 10002031, 10002033
     -- ------------------------------------------------------------------------
     local fullAnimCtrl = game.InstantiateClientUIControl(TEMPLATE_FULLSCREEN_ANIMATION, containerCtrl)
     fullAnimCtrl.name = "FullscreenAnimationSpec"
-    fullAnimCtrl.animationId     = 3001 -- integer [Read/Write]
-    fullAnimCtrl.playSoundEffect = false -- boolean [Read/Write]
+    fullAnimCtrl.animationId     = 10002001 -- integer [Read/Write] (View Ambience 1 — Looping Bokeh)
+    fullAnimCtrl.playSoundEffect = false    -- boolean [Read/Write]
 
     -- ------------------------------------------------------------------------
-    -- TYPE 10: ClientUIKeyHintControl (Input Device Prompt / Keybind Glyph)
-    -- Source: library/client_controls/KeyHintControl.d.lua
+    -- TYPE 10: ClientUIKeyHintControl (Dynamic Keybind / Gamepad Button Showcase)
+    -- Source: library/client_controls/KeyHintControl.d.lua & library/enums/Enum.d.lua
     -- Inherits: ClientUIBaseControl (0 subclass methods)
+    -- CRITICAL: Has ONLY .keyboardKeyCode and .controllerKeyCode (NO .text, NO .bgColor!).
+    -- Always use KeyHintControl instead of static "Press R" text so players who remapped
+    -- their keys (e.g. R -> '[') or use a Gamepad see their actual bound key!
+    --
+    -- Enum Counts (library/enums/Enum.d.lua):
+    --   * Enum.KeyboardKeyCode   : 59 entries (58 PC semantic keybinds + None)
+    --       - CharacterSkill1Key (E), CharacterSkill2Key (Q), CharacterSkill3Key (R), CharacterSkill4Key (T)
+    --       - MoveForwardKey (W), MoveLeftKey (A), MoveBackwardKey (S), MoveRightKey (D)
+    --       - NormalAttackKey (LMB), SprintKey (RMB/Left Shift), JumpKey (Space), InteractKey (F), DropKey (X)
+    --       - OpenShortcutWheelKey (Tab), SwitchToWalkOrRunKey (Left Ctrl)
+    --       - CraftspersonKey1..10 (1..0), CraftspersonKey11..22 (U,Z,Y,G,H,I,O,P,J,K,L,V)
+    --       - CraftspersonKey23..28 (F5..F10), CraftspersonKey29..35 (`, -, =, [, ,, ., /)
+    --       - CraftspersonKey36..39 (↑, ↓, ←, →), CraftspersonKey40..43 (Right Ctrl, Right Shift, Backspace, Caps Lock)
+    --   * Enum.ControllerKeyCode : 25 entries (24 Gamepad buttons/combos + None)
+    --       - NormalAttackKey (B), SprintKey (Right Button / RB), JumpKey (A), InteractKey (X)
+    --       - CharacterSkill1Key (Right Trigger / RT), CharacterSkill2Key (Y)
+    --       - CharacterSkill3Key (D-pad Up), CharacterSkill4Key (D-pad Down)
+    --       - MenuConfirmKey, MenuBackKey (Determined by controller navigation settings)
+    --       - CraftspersonKey1 (D-pad Up), CraftspersonKey2 (D-pad Down), CraftspersonKey3 (Left Trigger / LT)
+    --       - CraftspersonKey4 (LB + Y), CraftspersonKey5 (LB + X), CraftspersonKey6 (LB + A)
+    --       - CraftspersonKey7 (LB + D-pad Up), CraftspersonKey8 (LB + D-pad Right)
+    --       - CraftspersonKey9 (LB + D-pad Left), CraftspersonKey10 (LB + D-pad Down)
+    --       - CraftspersonKey11 (LB + RB), CraftspersonKey12 (LB + LT)
+    --       - CraftspersonKey13 (LB + RT), CraftspersonKey14 (LB + Left Stick Press)
+    --   * Enum.KeyEventType      : 164 entries total (58 Keyboard Down/Up = 116 + 24 Controller Down/Up = 48)
     -- ------------------------------------------------------------------------
     local keyHintCtrl = game.InstantiateClientUIControl(TEMPLATE_KEY_HINT, containerCtrl)
     keyHintCtrl.name = "KeyHintControlSpec"
-    keyHintCtrl.keyboardKeyCode   = Enum.KeyboardKeyCode.Space         -- EnumItem.KeyboardKeyCode [Read/Write]
-    keyHintCtrl.controllerKeyCode = Enum.ControllerKeyCode.ButtonSouth -- EnumItem.ControllerKeyCode [Read/Write]
+    keyHintCtrl:SetAnchorMin(0.5, 0.5)
+    keyHintCtrl:SetAnchorMax(0.5, 0.5)
+    keyHintCtrl:SetPivot(0.5, 0.5)
+    keyHintCtrl:SetAnchoredPosition(360, 120)
+    keyHintCtrl:SetSizeDelta(38, 30)
+    keyHintCtrl.keyboardKeyCode   = Enum.KeyboardKeyCode.CharacterSkill3Key   -- EnumItem.KeyboardKeyCode [Read/Write] (Default: 'R', or player's remapped key!)
+    keyHintCtrl.controllerKeyCode = Enum.ControllerKeyCode.CharacterSkill3Key -- EnumItem.ControllerKeyCode [Read/Write] (Default: 'D-pad Up')
 
     -- ------------------------------------------------------------------------
     -- TYPE 11: ClientUIReferenceControl (Nested Template Reference Instance)
     -- Source: library/client_controls/ReferenceControl.d.lua
     -- Inherits: ClientUIBaseControl (0 subclass methods)
+    -- Editor Inspector ("Template Reference"):
+    --   * "Reference Control Template" — statically embeds a Client Control Template
+    --     (e.g. TextBoxControl Index 1073741954) as a child of the ReferenceControl
+    --     when instantiated, without needing dynamic Lua instantiation code.
     -- ------------------------------------------------------------------------
     local refCtrl = game.InstantiateClientUIControl(TEMPLATE_REFERENCE, containerCtrl)
     refCtrl.name = "ReferenceControlSpec"
-    local refTemplateId = refCtrl.referencedPrefabIndex -- integer [Read]
+    local refTemplateId = refCtrl.referencedPrefabIndex -- integer [Read] (e.g. 1073741954)
 
     -- ------------------------------------------------------------------------
     -- 3. GLOBAL ENGINE APIs: game, script, Tween, TweenSequence, Color, Vector3, ServerSignal

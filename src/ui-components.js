@@ -224,6 +224,8 @@ export function renderClassDetail(cls, targetSubItem = null) {
 }
 
 export function renderEnumDetail(en, targetItem = null) {
+  const hasValue = en.items.some(i => i.value !== undefined);
+  const hasDefaultBind = en.items.some(i => i.defaultBind);
   return `
     <div style="margin-bottom: 12px; display: flex; align-items: center; justify-content: space-between;">
       <button class="brutal-btn back-to-enums-btn" style="padding: 4px 10px; font-size: 11px;">[ ← ALL ENUMS & KEYBINDS ]</button>
@@ -249,17 +251,19 @@ export function renderEnumDetail(en, targetItem = null) {
       <table class="ledger-table">
         <thead>
           <tr>
-            <th style="width: 32%;">ENUM ITEM</th>
-            ${en.items.some(i => i.defaultBind) ? '<th style="width: 25%;">DEFAULT KEYBIND</th>' : ''}
+            <th style="width: 30%;">ENUM ITEM</th>
+            ${hasValue ? '<th style="width: 9%;">VALUE</th>' : ''}
+            ${hasDefaultBind ? '<th style="width: 22%;">DEFAULT KEY / UI LABEL</th>' : ''}
             <th>DESCRIPTION</th>
-            <th style="width: 12%;">ACTION</th>
+            <th style="width: 10%;">ACTION</th>
           </tr>
         </thead>
         <tbody>
           ${en.items.map(item => `
             <tr class="field-row ${targetItem === item.name ? 'highlighted-row' : ''}">
               <td><strong class="hl-field-name">${highlightEnumItem(`${en.name}.${item.name}`)}</strong></td>
-              ${en.items.some(i => i.defaultBind) ? `<td><span class="inline-rune">${item.defaultBind || '—'}</span></td>` : ''}
+              ${hasValue ? `<td><code style="color: var(--accent-gold); font-weight: 700;">${item.value !== undefined ? item.value : '—'}</code></td>` : ''}
+              ${hasDefaultBind ? `<td><span class="inline-rune">${item.defaultBind || '—'}</span></td>` : ''}
               <td>${item.desc}</td>
               <td>
                 <button class="brutal-btn copy-code-btn" data-code="${encodeURIComponent(`${en.name}.${item.name}`)}" style="padding: 2px 6px; font-size: 10px;">[ COPY ]</button>

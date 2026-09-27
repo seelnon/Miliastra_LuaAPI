@@ -13,6 +13,37 @@
 import { grabScratchpadFile } from './scratchpad.js';
 import { copyToClipboard, showToast } from './ui-components.js';
 import { openLuaRunnerModal } from './lua-runner-modal.js';
+import {
+  STAGE_WIDTH,
+  STAGE_HEIGHT,
+  ensureNodeTransformDefaults,
+  getNodeStageGeometry,
+  renderStageGizmoOverlayHTML,
+  renderSelectedControlGizmoHandlesHTML,
+  renderBasicInspectorTabHTML,
+  bindTransformAndStageGizmoEvents
+} from './project-transform-gizmo.js';
+import {
+  ensureControlSpecificDefaults,
+  syncButtonStateMachineChildren,
+  renderStageButtonVisualHTML,
+  renderStageTextBoxVisualHTML,
+  renderStageKeyHintVisualHTML,
+  renderStageAnimationVisualHTML,
+  renderStageReferenceVisualHTML,
+  renderStageCursorAreaVisualHTML,
+  renderStageGridScrollerVisualHTML,
+  renderStageImageVisualHTML,
+  renderControlSpecificInspectorHTML,
+  renderBottomAssetLibraryDrawerHTML,
+  renderSideSelectorPanelHTML,
+  bindControlSpecificInspectorEvents,
+  buildControlSpecificLuaLines,
+  getKeyboardKeyHintMeta,
+  getControllerKeyHintMeta,
+  getVfxPresetMeta,
+  getReferenceTemplateMeta
+} from './project-control-settings.js';
 
 export function destroyInlineProjectSimulator() {
   // Simulation always opens in the pop-out modal by default
@@ -68,11 +99,15 @@ const UI_CONTROL_PRESET_TYPES = [
     className: 'ClientUITextWindowControl',
     prefabIndex: 1073741854,
     width: 240,
-    height: 90,
-    bgColor: { r: 32, g: 27, b: 22, a: 235 },
-    text: 'Scrollable TextWindow',
-    fontSize: 12,
-    fontColor: { r: 220, g: 205, b: 175, a: 255 },
+    height: 110,
+    interactable: true,
+    showScrollBar: true,
+    alignH: 'left',
+    alignV: 'top',
+    bgColor: { r: 255, g: 255, b: 255, a: 0 },
+    text: 'text text text text text text text\ntext text text text text text text\ntext text text text text text text\ntext text text',
+    fontSize: 20,
+    fontColor: { r: 255, g: 255, b: 255, a: 255 },
     raycastTarget: true
   },
   {
@@ -84,12 +119,9 @@ const UI_CONTROL_PRESET_TYPES = [
     prefabIndex: 1073741851,
     width: 156,
     height: 44,
-    bgColor: { r: 58, g: 48, b: 36, a: 245 },
-    text: 'New Button',
-    fontSize: 14,
-    fontColor: { r: 245, g: 238, b: 220, a: 255 },
     raycastTarget: true,
-    interactable: true
+    interactable: true,
+    clickAudioId: 1001
   },
   {
     typeKey: 'GridScrollerControl',
@@ -98,13 +130,25 @@ const UI_CONTROL_PRESET_TYPES = [
     baseName: 'GridScrollerControl',
     className: 'ClientUIGridScrollerControl',
     prefabIndex: 1073741855,
-    width: 220,
-    height: 110,
-    bgColor: { r: 36, g: 30, b: 24, a: 210 },
-    text: 'GridScroller [⊞]',
-    fontSize: 12,
-    fontColor: { r: 196, g: 160, b: 89, a: 255 },
-    raycastTarget: true
+    width: 240,
+    height: 120,
+    interactable: true,
+    showScrollBar: true,
+    raycastTarget: true,
+    scrollDirection: 'Vertical',
+    layoutConstraint: 'AutoWrap',
+    layoutConstraintFixedCount: 3,
+    itemPrefabIndex: 1073741954,
+    itemCount: 12,
+    itemWidth: 56,
+    itemHeight: 36,
+    spacingX: 6,
+    spacingY: 6,
+    paddingTop: 6,
+    paddingBottom: 6,
+    paddingLeft: 6,
+    paddingRight: 6,
+    scrollProgress: 0
   },
   {
     typeKey: 'ContainerControl',
@@ -115,6 +159,10 @@ const UI_CONTROL_PRESET_TYPES = [
     prefabIndex: 1073741852,
     width: 200,
     height: 80,
+    isolateNavigation: false,
+    disableKeyEventPassthrough: false,
+    disableCursorEventPassthrough: false,
+    showCursor: false,
     bgColor: { r: 46, g: 38, b: 30, a: 120 },
     raycastTarget: false
   },
@@ -127,23 +175,22 @@ const UI_CONTROL_PRESET_TYPES = [
     prefabIndex: 1073741856,
     width: 160,
     height: 60,
-    bgColor: { r: 75, g: 60, b: 38, a: 140 },
-    raycastTarget: true,
+    persistentAreaPreview: true,
+    raycastTarget: false,
     interactable: true
   },
   {
     typeKey: 'AnimationControl',
     label: '+ ClientUIAnimationControl',
-    icon: '▶',
+    icon: '✦',
     baseName: 'AnimationControl',
     className: 'ClientUIAnimationControl',
     prefabIndex: 1073741857,
-    width: 150,
-    height: 54,
-    bgColor: { r: 64, g: 44, b: 36, a: 210 },
-    text: '▶ Animation',
-    fontSize: 12,
-    fontColor: { r: 238, g: 217, b: 171, a: 255 },
+    width: 140,
+    height: 64,
+    animationId: 10001001,
+    playSoundEffect: false,
+    layer: 1,
     raycastTarget: false
   },
   {
@@ -153,12 +200,10 @@ const UI_CONTROL_PRESET_TYPES = [
     baseName: 'FullscreenAnimationControl',
     className: 'ClientUIFullscreenAnimationControl',
     prefabIndex: 1073741860,
-    width: 260,
-    height: 64,
-    bgColor: { r: 52, g: 36, b: 48, a: 200 },
-    text: '⛶ FullscreenAnim',
-    fontSize: 12,
-    fontColor: { r: 238, g: 217, b: 171, a: 255 },
+    width: 320,
+    height: 84,
+    animationId: 10002001,
+    playSoundEffect: false,
     raycastTarget: false
   },
   {
@@ -170,8 +215,12 @@ const UI_CONTROL_PRESET_TYPES = [
     prefabIndex: 1073741858,
     width: 36,
     height: 28,
+    keyboardKeyCode: 2,
+    controllerKeyCode: 6,
+    previewKeyHintDevice: 'keyboard',
+    playerCustomKeyOverride: '',
     bgColor: { r: 245, g: 245, b: 245, a: 255 },
-    text: 'E',
+    text: '1',
     fontSize: 13,
     fontColor: { r: 24, g: 20, b: 16, a: 255 },
     raycastTarget: false
@@ -183,13 +232,9 @@ const UI_CONTROL_PRESET_TYPES = [
     baseName: 'ReferenceControl',
     className: 'ClientUIReferenceControl',
     prefabIndex: 1073741859,
-    referencedPrefabIndex: 1073741850,
-    width: 150,
-    height: 40,
-    bgColor: { r: 42, g: 52, b: 58, a: 200 },
-    text: '🔗 Reference',
-    fontSize: 12,
-    fontColor: { r: 175, g: 220, b: 238, a: 255 },
+    referencedPrefabIndex: 1073741954,
+    width: 170,
+    height: 44,
     raycastTarget: false
   }
 ];
@@ -281,7 +326,6 @@ local maxHorizontalSpeed = 420
 function OnStart()
     image = script.object
     script:EnableUpdate(true)
-    image.imageColor = Color.FromRGB(255, 0, 0)
 end
 
 function Bounce()
@@ -369,9 +413,14 @@ local function TogglePauseBannerState()
     isBannerActive = not isBannerActive
     pauseBannerCtrl:SetActive(isBannerActive)
     if togglePauseBtn then
-        togglePauseBtn.text = isBannerActive
+        local nextLabel = isBannerActive
             and "[ TOGGLE SetActive(false) (CLICK / F) ]"
             or "[ TOGGLE SetActive(true) (CLICK / F) ]"
+        togglePauseBtn.text = nextLabel
+        for _, stateChild in ipairs(togglePauseBtn:GetChildren()) do
+            local lbl = stateChild:GetChild("Label")
+            if lbl then lbl.text = nextLabel end
+        end
     end
     print("[HUDController] Called PauseBanner:SetActive(" .. tostring(isBannerActive) .. ")")
 end
@@ -424,8 +473,6 @@ local spinSpeed = 45
 
 function OnStart()
     orb = script.object
-    orb:SetImage(Enum.ImageSource.StaticReference, 100005) -- 5-Point Star
-    orb.imageColor = Color.FromRGB(218, 175, 78)
     script:EnableUpdate(true)
 end
 
@@ -531,10 +578,12 @@ export const SCENE_PROJECTS = [
         height: 44,
         raycastTarget: true,
         interactable: true,
-        bgColor: { r: 58, g: 48, b: 36, a: 245 },
-        text: 'Press it!',
-        fontSize: 15,
-        fontColor: { r: 245, g: 238, b: 220, a: 255 },
+        clickAudioId: 1001,
+        normalStatusNodeKey: 'Btn_Normal_Container',
+        hoverStatusNodeKey: 'Btn_Hover_Container',
+        pressedStatusNodeKey: 'Btn_Pressed_Container',
+        disabledStatusNodeKey: 'Btn_Disabled_Container',
+        previewButtonState: 'normal',
         script: {
           id: 1,
           filename: 'Button_toControl_Image_Bounce.lua',
@@ -545,42 +594,250 @@ export const SCENE_PROJECTS = [
           code: DEFAULT_BUTTON_LUA
         }
       },
+      // 1-Tier Direct Child Status Nodes of PresetButton (State Machine representations)
+      // Note: Layered ordering — top layer in container (Text) renders ON TOP of bottom layer (Bg)
       {
-        key: 'PresetButton_ImageControl',
+        key: 'Btn_Normal_Container',
         parentKey: 'PresetButton',
         id: 6,
-        userdataHandle: 61,
+        userdataHandle: 101,
         depth: 2,
-        icon: '▣',
-        name: 'ImageControl',
-        className: 'ClientUIImageControl',
-        prefabIndex: 1073741850,
-        uiPath: 'PresetButton/ImageControl',
+        icon: '□',
+        name: 'Btn_Normal_Container',
+        className: 'ClientUIContainerControl',
+        prefabIndex: 1073741852,
+        uiPath: 'PresetButton/Btn_Normal_Container',
         x: 0,
         y: 0,
         width: 148,
         height: 44,
+        active: true,
         visible: true,
-        raycastTarget: false,
         script: null
       },
       {
-        key: 'PresetButton_SubContainer',
-        parentKey: 'PresetButton',
-        id: 7,
-        userdataHandle: 68,
-        depth: 2,
-        icon: '□',
-        name: 'ContainerControl',
-        className: 'ClientUIContainerControl',
-        prefabIndex: 1073741852,
-        uiPath: 'PresetButton/ContainerControl',
+        key: 'Normal_Text',
+        parentKey: 'Btn_Normal_Container',
+        id: 8,
+        userdataHandle: 103,
+        depth: 3,
+        icon: 'T',
+        name: 'Normal_Text',
+        className: 'ClientUITextBoxControl',
+        prefabIndex: 1073741849,
+        uiPath: 'PresetButton/Btn_Normal_Container/Normal_Text',
         x: 0,
         y: 0,
         width: 148,
         height: 44,
-        visible: true,
-        raycastTarget: false,
+        text: 'Press it!',
+        fontSize: 15,
+        alignH: 'center',
+        alignV: 'middle',
+        fontColor: { r: 245, g: 238, b: 220, a: 255 },
+        bgColor: { r: 0, g: 0, b: 0, a: 0 },
+        script: null
+      },
+      {
+        key: 'Normal_Bg',
+        parentKey: 'Btn_Normal_Container',
+        id: 7,
+        userdataHandle: 102,
+        depth: 3,
+        icon: '▣',
+        name: 'Normal_Bg',
+        className: 'ClientUIImageControl',
+        prefabIndex: 1073741850,
+        uiPath: 'PresetButton/Btn_Normal_Container/Normal_Bg',
+        x: 0,
+        y: 0,
+        width: 148,
+        height: 44,
+        resourceId: 100001,
+        imageColor: { r: 58, g: 48, b: 36, a: 245 },
+        script: null
+      },
+      {
+        key: 'Btn_Hover_Container',
+        parentKey: 'PresetButton',
+        id: 9,
+        userdataHandle: 104,
+        depth: 2,
+        icon: '□',
+        name: 'Btn_Hover_Container',
+        className: 'ClientUIContainerControl',
+        prefabIndex: 1073741852,
+        uiPath: 'PresetButton/Btn_Hover_Container',
+        x: 0,
+        y: 0,
+        width: 148,
+        height: 44,
+        active: false,
+        visible: false,
+        script: null
+      },
+      {
+        key: 'Hover_Text',
+        parentKey: 'Btn_Hover_Container',
+        id: 11,
+        userdataHandle: 106,
+        depth: 3,
+        icon: 'T',
+        name: 'Hover_Text',
+        className: 'ClientUITextBoxControl',
+        prefabIndex: 1073741849,
+        uiPath: 'PresetButton/Btn_Hover_Container/Hover_Text',
+        x: 0,
+        y: 0,
+        width: 148,
+        height: 44,
+        text: '<b>▶ Press it! ◀</b>',
+        fontSize: 15,
+        alignH: 'center',
+        alignV: 'middle',
+        fontColor: { r: 255, g: 235, b: 175, a: 255 },
+        bgColor: { r: 0, g: 0, b: 0, a: 0 },
+        script: null
+      },
+      {
+        key: 'Hover_Bg',
+        parentKey: 'Btn_Hover_Container',
+        id: 10,
+        userdataHandle: 105,
+        depth: 3,
+        icon: '▣',
+        name: 'Hover_Bg',
+        className: 'ClientUIImageControl',
+        prefabIndex: 1073741850,
+        uiPath: 'PresetButton/Btn_Hover_Container/Hover_Bg',
+        x: 0,
+        y: 0,
+        width: 148,
+        height: 44,
+        resourceId: 100001,
+        imageColor: { r: 122, g: 92, b: 44, a: 255 },
+        script: null
+      },
+      {
+        key: 'Btn_Pressed_Container',
+        parentKey: 'PresetButton',
+        id: 12,
+        userdataHandle: 107,
+        depth: 2,
+        icon: '□',
+        name: 'Btn_Pressed_Container',
+        className: 'ClientUIContainerControl',
+        prefabIndex: 1073741852,
+        uiPath: 'PresetButton/Btn_Pressed_Container',
+        x: 0,
+        y: 0,
+        width: 148,
+        height: 44,
+        active: false,
+        visible: false,
+        script: null
+      },
+      {
+        key: 'Pressed_Text',
+        parentKey: 'Btn_Pressed_Container',
+        id: 14,
+        userdataHandle: 109,
+        depth: 3,
+        icon: 'T',
+        name: 'Pressed_Text',
+        className: 'ClientUITextBoxControl',
+        prefabIndex: 1073741849,
+        uiPath: 'PresetButton/Btn_Pressed_Container/Pressed_Text',
+        x: 0,
+        y: 0,
+        width: 148,
+        height: 44,
+        text: '<b>⚡ BOUNCE! ⚡</b>',
+        fontSize: 14,
+        alignH: 'center',
+        alignV: 'middle',
+        fontColor: { r: 255, g: 245, b: 220, a: 255 },
+        bgColor: { r: 0, g: 0, b: 0, a: 0 },
+        script: null
+      },
+      {
+        key: 'Pressed_Bg',
+        parentKey: 'Btn_Pressed_Container',
+        id: 13,
+        userdataHandle: 108,
+        depth: 3,
+        icon: '▣',
+        name: 'Pressed_Bg',
+        className: 'ClientUIImageControl',
+        prefabIndex: 1073741850,
+        uiPath: 'PresetButton/Btn_Pressed_Container/Pressed_Bg',
+        x: 0,
+        y: 0,
+        width: 148,
+        height: 44,
+        resourceId: 100001,
+        imageColor: { r: 165, g: 62, b: 42, a: 255 },
+        script: null
+      },
+      {
+        key: 'Btn_Disabled_Container',
+        parentKey: 'PresetButton',
+        id: 15,
+        userdataHandle: 110,
+        depth: 2,
+        icon: '□',
+        name: 'Btn_Disabled_Container',
+        className: 'ClientUIContainerControl',
+        prefabIndex: 1073741852,
+        uiPath: 'PresetButton/Btn_Disabled_Container',
+        x: 0,
+        y: 0,
+        width: 148,
+        height: 44,
+        active: false,
+        visible: false,
+        script: null
+      },
+      {
+        key: 'Disabled_Text',
+        parentKey: 'Btn_Disabled_Container',
+        id: 17,
+        userdataHandle: 112,
+        depth: 3,
+        icon: 'T',
+        name: 'Disabled_Text',
+        className: 'ClientUITextBoxControl',
+        prefabIndex: 1073741849,
+        uiPath: 'PresetButton/Btn_Disabled_Container/Disabled_Text',
+        x: 0,
+        y: 0,
+        width: 148,
+        height: 44,
+        text: 'Disabled',
+        fontSize: 14,
+        alignH: 'center',
+        alignV: 'middle',
+        fontColor: { r: 130, g: 120, b: 105, a: 200 },
+        bgColor: { r: 0, g: 0, b: 0, a: 0 },
+        script: null
+      },
+      {
+        key: 'Disabled_Bg',
+        parentKey: 'Btn_Disabled_Container',
+        id: 16,
+        userdataHandle: 111,
+        depth: 3,
+        icon: '▣',
+        name: 'Disabled_Bg',
+        className: 'ClientUIImageControl',
+        prefabIndex: 1073741850,
+        uiPath: 'PresetButton/Btn_Disabled_Container/Disabled_Bg',
+        x: 0,
+        y: 0,
+        width: 148,
+        height: 44,
+        resourceId: 100001,
+        imageColor: { r: 42, g: 38, b: 34, a: 180 },
         script: null
       },
       {
@@ -589,7 +846,7 @@ export const SCENE_PROJECTS = [
         id: 4,
         userdataHandle: 75,
         depth: 1,
-        icon: '□',
+        icon: '▣',
         name: 'Container_with_1Pixel',
         className: 'ClientUIImageControl',
         prefabIndex: 1073741853,
@@ -598,7 +855,9 @@ export const SCENE_PROJECTS = [
         y: -20,
         width: 190,
         height: 40,
-        enableSoftEdge: true,
+        resourceId: 100001,
+        enableMask: false,
+        enableSoftEdge: false,
         softEdgeWidthX: 10,
         softEdgeWidthY: 10,
         imageColor: { r: 255, g: 0, b: 0, a: 255 },
@@ -611,25 +870,6 @@ export const SCENE_PROJECTS = [
           aliases: ['Container_with_1pixel', 'Image_Control', 'Container_with_1Pixel'],
           code: DEFAULT_IMAGE_LUA
         }
-      },
-      {
-        key: 'Container_1Pixel_InnerImage',
-        parentKey: 'Container_with_1Pixel',
-        id: 8,
-        userdataHandle: 78,
-        depth: 2,
-        icon: '▣',
-        name: 'ImageControl',
-        className: 'ClientUIImageControl',
-        prefabIndex: 1073741850,
-        uiPath: 'Container_with_1Pixel/ImageControl',
-        x: 0,
-        y: 0,
-        width: 190,
-        height: 40,
-        visible: true,
-        raycastTarget: false,
-        script: null
       },
       {
         key: 'KeyHintControl',
@@ -646,6 +886,10 @@ export const SCENE_PROJECTS = [
         y: 160,
         width: 32,
         height: 26,
+        keyboardKeyCode: 2,
+        controllerKeyCode: 6,
+        previewKeyHintDevice: 'keyboard',
+        playerCustomKeyOverride: '',
         bgColor: { r: 245, g: 245, b: 245, a: 255 },
         text: '1',
         fontSize: 13,
@@ -662,12 +906,12 @@ export const SCENE_PROJECTS = [
         name: 'ReferenceControl',
         className: 'ClientUIReferenceControl',
         prefabIndex: 1073741859,
-        referencedPrefabIndex: 1073741850,
+        referencedPrefabIndex: 1073741954,
         uiPath: 'ReferenceControl',
         x: 0,
         y: -150,
-        width: 140,
-        height: 36,
+        width: 170,
+        height: 44,
         visible: true,
         raycastTarget: false,
         script: null
@@ -712,10 +956,12 @@ export const SCENE_PROJECTS = [
         height: 46,
         raycastTarget: true,
         interactable: true,
-        bgColor: { r: 58, g: 46, b: 32, a: 245 },
-        text: '[ CAST SKILL (CLICK / SPACE) ]',
-        fontSize: 13,
-        fontColor: { r: 238, g: 217, b: 171, a: 255 },
+        clickAudioId: 1001,
+        normalStatusNodeKey: 'CastSkill_Normal',
+        hoverStatusNodeKey: 'CastSkill_Hover',
+        pressedStatusNodeKey: 'CastSkill_Pressed',
+        disabledStatusNodeKey: '',
+        previewButtonState: 'normal',
         script: {
           id: 1,
           filename: 'HUDInputController.lua',
@@ -726,22 +972,123 @@ export const SCENE_PROJECTS = [
         }
       },
       {
-        key: 'CastSkill_BgText',
+        key: 'CastSkill_Normal',
         parentKey: 'CastSkillButton',
         id: 6,
-        userdataHandle: 35,
+        userdataHandle: 121,
         depth: 2,
-        icon: 'T',
-        name: 'ButtonLabelTextBox',
-        className: 'ClientUITextBoxControl',
-        prefabIndex: 1073741849,
-        uiPath: 'CastSkillButton/ButtonLabelTextBox',
+        icon: '□',
+        name: 'CastSkill_Normal',
+        className: 'ClientUIContainerControl',
+        prefabIndex: 1073741852,
         x: 0,
         y: 0,
         width: 300,
         height: 46,
+        active: true,
         visible: true,
-        raycastTarget: false,
+        script: null
+      },
+      {
+        key: 'CastSkill_Normal_Label',
+        parentKey: 'CastSkill_Normal',
+        id: 7,
+        userdataHandle: 122,
+        depth: 3,
+        icon: 'T',
+        name: 'Label',
+        className: 'ClientUITextBoxControl',
+        prefabIndex: 1073741849,
+        x: 0,
+        y: 0,
+        width: 300,
+        height: 46,
+        bgColor: { r: 58, g: 46, b: 32, a: 245 },
+        text: '[ CAST SKILL (CLICK / SPACE) ]',
+        fontSize: 13,
+        alignH: 'center',
+        alignV: 'middle',
+        fontColor: { r: 238, g: 217, b: 171, a: 255 },
+        script: null
+      },
+      {
+        key: 'CastSkill_Hover',
+        parentKey: 'CastSkillButton',
+        id: 8,
+        userdataHandle: 123,
+        depth: 2,
+        icon: '□',
+        name: 'CastSkill_Hover',
+        className: 'ClientUIContainerControl',
+        prefabIndex: 1073741852,
+        x: 0,
+        y: 0,
+        width: 300,
+        height: 46,
+        active: false,
+        visible: false,
+        script: null
+      },
+      {
+        key: 'CastSkill_Hover_Label',
+        parentKey: 'CastSkill_Hover',
+        id: 9,
+        userdataHandle: 124,
+        depth: 3,
+        icon: 'T',
+        name: 'Label',
+        className: 'ClientUITextBoxControl',
+        prefabIndex: 1073741849,
+        x: 0,
+        y: 0,
+        width: 300,
+        height: 46,
+        bgColor: { r: 112, g: 84, b: 42, a: 255 },
+        text: '<b>▶ [ CAST SKILL (CLICK / SPACE) ] ◀</b>',
+        fontSize: 13,
+        alignH: 'center',
+        alignV: 'middle',
+        fontColor: { r: 255, g: 238, b: 185, a: 255 },
+        script: null
+      },
+      {
+        key: 'CastSkill_Pressed',
+        parentKey: 'CastSkillButton',
+        id: 10,
+        userdataHandle: 125,
+        depth: 2,
+        icon: '□',
+        name: 'CastSkill_Pressed',
+        className: 'ClientUIContainerControl',
+        prefabIndex: 1073741852,
+        x: 0,
+        y: 0,
+        width: 300,
+        height: 46,
+        active: false,
+        visible: false,
+        script: null
+      },
+      {
+        key: 'CastSkill_Pressed_Label',
+        parentKey: 'CastSkill_Pressed',
+        id: 11,
+        userdataHandle: 126,
+        depth: 3,
+        icon: 'T',
+        name: 'Label',
+        className: 'ClientUITextBoxControl',
+        prefabIndex: 1073741849,
+        x: 0,
+        y: 0,
+        width: 300,
+        height: 46,
+        bgColor: { r: 165, g: 62, b: 42, a: 255 },
+        text: '<b>⚡ [ SKILL CASTING! ] ⚡</b>',
+        fontSize: 13,
+        alignH: 'center',
+        alignV: 'middle',
+        fontColor: { r: 255, g: 245, b: 220, a: 255 },
         script: null
       },
       {
@@ -761,10 +1108,92 @@ export const SCENE_PROJECTS = [
         height: 46,
         raycastTarget: true,
         interactable: true,
+        clickAudioId: 1001,
+        normalStatusNodeKey: 'TogglePause_Normal',
+        hoverStatusNodeKey: 'TogglePause_Hover',
+        pressedStatusNodeKey: '',
+        disabledStatusNodeKey: '',
+        previewButtonState: 'normal',
+        script: null
+      },
+      {
+        key: 'TogglePause_Normal',
+        parentKey: 'TogglePauseButton',
+        id: 12,
+        userdataHandle: 127,
+        depth: 2,
+        icon: '□',
+        name: 'TogglePause_Normal',
+        className: 'ClientUIContainerControl',
+        prefabIndex: 1073741852,
+        x: 0,
+        y: 0,
+        width: 320,
+        height: 46,
+        active: true,
+        visible: true,
+        script: null
+      },
+      {
+        key: 'TogglePause_Normal_Label',
+        parentKey: 'TogglePause_Normal',
+        id: 13,
+        userdataHandle: 128,
+        depth: 3,
+        icon: 'T',
+        name: 'Label',
+        className: 'ClientUITextBoxControl',
+        prefabIndex: 1073741849,
+        x: 0,
+        y: 0,
+        width: 320,
+        height: 46,
         bgColor: { r: 46, g: 38, b: 32, a: 245 },
         text: '[ TOGGLE SetActive(false) (CLICK / F) ]',
         fontSize: 13,
+        alignH: 'center',
+        alignV: 'middle',
         fontColor: { r: 210, g: 190, b: 150, a: 255 },
+        script: null
+      },
+      {
+        key: 'TogglePause_Hover',
+        parentKey: 'TogglePauseButton',
+        id: 14,
+        userdataHandle: 129,
+        depth: 2,
+        icon: '□',
+        name: 'TogglePause_Hover',
+        className: 'ClientUIContainerControl',
+        prefabIndex: 1073741852,
+        x: 0,
+        y: 0,
+        width: 320,
+        height: 46,
+        active: false,
+        visible: false,
+        script: null
+      },
+      {
+        key: 'TogglePause_Hover_Label',
+        parentKey: 'TogglePause_Hover',
+        id: 15,
+        userdataHandle: 130,
+        depth: 3,
+        icon: 'T',
+        name: 'Label',
+        className: 'ClientUITextBoxControl',
+        prefabIndex: 1073741849,
+        x: 0,
+        y: 0,
+        width: 320,
+        height: 46,
+        bgColor: { r: 92, g: 68, b: 46, a: 255 },
+        text: '[ TOGGLE SetActive(false) (CLICK / F) ]',
+        fontSize: 13,
+        alignH: 'center',
+        alignV: 'middle',
+        fontColor: { r: 245, g: 228, b: 185, a: 255 },
         script: null
       },
       {
@@ -782,6 +1211,7 @@ export const SCENE_PROJECTS = [
         y: 10,
         width: 115,
         height: 115,
+        resourceId: 100005,
         imageColor: { r: 218, g: 175, b: 78, a: 255 },
         script: {
           id: 2,
@@ -791,25 +1221,6 @@ export const SCENE_PROJECTS = [
           aliases: ['SkillCooldownOrb'],
           code: PROJECT_2_ORB_SCRIPT_LUA
         }
-      },
-      {
-        key: 'CooldownOrb_InnerRing',
-        parentKey: 'CooldownOrb',
-        id: 7,
-        userdataHandle: 59,
-        depth: 2,
-        icon: '▣',
-        name: 'ImageControl',
-        className: 'ClientUIImageControl',
-        prefabIndex: 1073741850,
-        uiPath: 'CooldownOrb/ImageControl',
-        x: 0,
-        y: 0,
-        width: 72,
-        height: 72,
-        visible: true,
-        raycastTarget: false,
-        script: null
       },
       {
         key: 'PauseBanner',
@@ -1021,15 +1432,43 @@ end
     case 'ClientUIGridScrollerControl':
       return `---@meta
 -- Mounted on GridScrollerControl: ${node.uiPath} (${node.className}:${node.userdataHandle}, id:${node.id})
+-- Why 1 Template? grid.itemPrefabIndex is your reusable "Slot Blueprint" (e.g. TextBox / PresetButton / Container).
+-- Calling grid:RefreshItems(count, callback) instantiates 'count' copies and passes each (slotCtrl, index)
+-- so you can customize every slot (Minecraft / Terraria inventory style) and detect clicked slot indices!
 
 local grid = nil
 
+local INVENTORY_ITEMS = {
+    { name = "Dirt",     qty = 64, r = 139, g = 90,  b = 43  },
+    { name = "Stone",    qty = 64, r = 120, g = 126, b = 134 },
+    { name = "Pickaxe",  qty = 1,  r = 212, g = 175, b = 55  },
+    { name = "Torch",    qty = 16, r = 245, g = 158, b = 11  },
+    { name = "Gold Ore", qty = 12, r = 234, g = 179, b = 8   },
+    { name = "Potion",   qty = 5,  r = 225, g = 68,  b = 68  },
+    { name = "Mana Gem", qty = 3,  r = 56,  g = 189, b = 248 },
+    { name = "Wood",     qty = 32, r = 168, g = 112, b = 58  },
+    { name = "Gel",      qty = 99, r = 74,  g = 222, b = 128 }
+}
+
 function OnStart()
     grid = script.object
+    grid.itemPrefabIndex = ${node.itemPrefabIndex || 1073741954}
     grid.interactable = true
     grid.showScrollBar = true
-    grid:RefreshItems(4, function(itemControl, index)
-        print("[${node.name}] Instantiated grid item #" .. tostring(index) .. " -> " .. tostring(itemControl))
+    grid.raycastTarget = true
+
+    grid:RefreshItems(#INVENTORY_ITEMS, function(slotCtrl, index)
+        local item = INVENTORY_ITEMS[index + 1] -- index is 0-based (0 .. count-1)
+        slotCtrl.name = "Slot_" .. tostring(index)
+        slotCtrl.fontSize = 11
+        slotCtrl.fontColor = Color.FromRGB(245, 235, 214)
+        slotCtrl.bgColor = Color.FromRGBA(item.r, item.g, item.b, 220)
+        slotCtrl.text = string.format("#%d %s\\nx%d", index, item.name, item.qty)
+
+        slotCtrl:AddCursorEventListener(Enum.CursorEventType.CursorClick, function()
+            local clickedIdx = grid:GetItemIndex(slotCtrl)
+            print(string.format("[${node.name}] Clicked Inventory Slot #%d -> %s (x%d)", clickedIdx, item.name, item.qty))
+        end)
     end)
 end
 `;
@@ -1037,54 +1476,90 @@ end
     case 'ClientUIContainerControl':
       return `---@meta
 -- Mounted on ContainerControl: ${node.uiPath} (${node.className}:${node.userdataHandle}, id:${node.id})
+-- Function Settings: isolateNavigation, disableKeyEventPassthrough, disableCursorEventPassthrough, showCursor
 
 local container = nil
 
 function OnStart()
     container = script.object
-    container.showCursor = true
+    container.isolateNavigation = ${Boolean(node.isolateNavigation)}
+    container.disableKeyEventPassthrough = ${Boolean(node.disableKeyEventPassthrough)}
+    container.disableCursorEventPassthrough = ${Boolean(node.disableCursorEventPassthrough)}
+    container.showCursor = ${node.showCursor !== undefined ? Boolean(node.showCursor) : true}
 ${childLookupLine}    print("[${node.uiPath}] ContainerControl started with " .. tostring(#container:GetChildren()) .. " children")
 end
 `;
 
-    case 'ClientUIAnimationControl':
+    case 'ClientUIAnimationControl': {
+      const vfx = getVfxPresetMeta(node.animationId ?? 10001001, 'ClientUIAnimationControl');
       return `---@meta
 -- Mounted on AnimationControl: ${node.uiPath} (${node.className}:${node.userdataHandle}, id:${node.id})
+-- Localized Particle Effects around control/cursor area (10001001..10001160):
+--   • Looping (62 IDs, e.g. 10001001): Continuous particles; turn on/off with :PlayAnimation() / :StopAnimation()
+--   • Non-Looping (98 IDs, e.g. 10001008): Plays a 1-shot particle burst and disappears automatically
+--   • Layer: Enum.UIAnimationLayer.AboveAllControls (1) or Enum.UIAnimationLayer.BelowAllControls (0)
 
 local anim = nil
 
 function OnStart()
     anim = script.object
-    anim.playSoundEffect = true
+    anim.animationId = ${vfx.id || 10001001} -- ${vfx.name} (${vfx.looping ? 'Looping Particle Aura' : '1-Shot Particle Burst'})
+    anim.playSoundEffect = ${Boolean(node.playSoundEffect)}
+    anim.layer = Enum.UIAnimationLayer.${Number(node.layer) === 1 ? 'AboveAllControls' : 'BelowAllControls'}
     anim:PlayAnimation()
-    print("[${node.uiPath}] AnimationControl playing animationId=" .. tostring(anim.animationId))
+    print("[${node.uiPath}] UIAnimationControl playing animationId=" .. tostring(anim.animationId))
 end
 `;
+    }
 
-    case 'ClientUIFullscreenAnimationControl':
+    case 'ClientUIFullscreenAnimationControl': {
+      const vfx = getVfxPresetMeta(node.animationId ?? 10002001);
       return `---@meta
 -- Mounted on FullscreenAnimationControl: ${node.uiPath} (${node.className}:${node.userdataHandle}, id:${node.id})
+-- Looping IDs (Bokeh/Corner Dimming): 10002001..10002005, 10002009, 10002014..10002015, 10002018, 10002020..10002023, 10002025..10002029, 10002032, 10002034..10002037
+-- Non-Looping IDs (1-2s Screen Glitch/Burst): 10002006..10002008, 10002010..10002013, 10002016..10002017, 10002019, 10002024, 10002030..10002031, 10002033
 
 local fullAnim = nil
 
 function OnStart()
     fullAnim = script.object
-    fullAnim.playSoundEffect = true
+    fullAnim.animationId = ${vfx.id || 10002001} -- ${vfx.name} (${vfx.looping ? 'Looping Bokeh' : '1-Shot Screen Glitch'})
+    fullAnim.playSoundEffect = ${Boolean(node.playSoundEffect)}
     print("[${node.uiPath}] FullscreenAnimationControl active (animationId=" .. tostring(fullAnim.animationId) .. ")")
 end
 `;
+    }
 
-    case 'ClientUIKeyHintControl':
+    case 'ClientUIKeyHintControl': {
+      const kbMeta = getKeyboardKeyHintMeta(node.keyboardKeyCode ?? 2);
+      const ctrlMeta = getControllerKeyHintMeta(node.controllerKeyCode ?? 6);
+      const kbDownEvt = kbMeta.keyEventBase ? `Enum.KeyEventType.${kbMeta.keyEventBase}KeyDown` : 'Enum.KeyEventType.KeyboardNumber1KeyDown';
+      const ctrlDownEvt = ctrlMeta.keyEventBase ? `Enum.KeyEventType.${ctrlMeta.keyEventBase}KeyDown` : 'Enum.KeyEventType.ControllerActionBottomKeyDown';
       return `---@meta
 -- Mounted on KeyHintControl: ${node.uiPath} (${node.className}:${node.userdataHandle}, id:${node.id})
+-- Dynamic Player Keybind Showcase: automatically renders the player's actual bound key
+-- (e.g., if the player remapped 'R' to '[', KeyHintControl displays '[' instead of static text!)
 
 local keyHint = nil
 
 function OnStart()
     keyHint = script.object
+    keyHint.keyboardKeyCode = Enum.KeyboardKeyCode.${kbMeta.enumName} -- (${kbMeta.code}) "${kbMeta.inspectorLabel}"
+    keyHint.controllerKeyCode = Enum.ControllerKeyCode.${ctrlMeta.enumName} -- (${ctrlMeta.code}) "${ctrlMeta.inspectorLabel}"
     print("[${node.uiPath}] KeyHintControl active on device: " .. tostring(game.GetDevice()))
+
+    keyHint:AddKeyEventListener(${kbDownEvt}, function(ctrl, eventType)
+        print("[${node.uiPath}] Triggered PC action (${kbMeta.inspectorLabel}): " .. tostring(eventType))
+        return true
+    end)
+
+    keyHint:AddKeyEventListener(${ctrlDownEvt}, function(ctrl, eventType)
+        print("[${node.uiPath}] Triggered Gamepad action (${ctrlMeta.inspectorLabel}): " .. tostring(eventType))
+        return true
+    end)
 end
 `;
+    }
 
     case 'ClientUIReferenceControl':
       return `---@meta
@@ -1146,9 +1621,29 @@ export function renderProjectsView(container, onOpenInScratchpad = null) {
   let activeProjectIndex = 0;
   let selectedNodeKey = 'PresetButton';
   let activeLuaFileNodeKey = null;
+  let activeInspectorTab = 'basic'; // 'basic' | 'script' ([img-2])
   let treeSearchQuery = '';
   let addControlTypeIndex = 0;
-  const collapsedNodeKeys = new Set();
+  const collapsedNodeKeys = new Set([
+    'Btn_Normal_Container',
+    'Btn_Hover_Container',
+    'Btn_Pressed_Container',
+    'Btn_Disabled_Container',
+    'CastSkill_Normal',
+    'CastSkill_Hover',
+    'CastSkill_Pressed',
+    'TogglePause_Normal',
+    'TogglePause_Hover'
+  ]);
+  const gizmoUiState = {
+    waypointPopoverOpen: false,
+    transformCollapsed: false,
+    createCollapsed: false,
+    stageZoom: 1.0,
+    stagePanX: 0,
+    stagePanY: 0,
+    baseFitScale: 0.72
+  };
 
   const getActiveProject = () => SCENE_PROJECTS[activeProjectIndex];
   const getSelectedNode = () => {
@@ -1196,82 +1691,242 @@ export function renderProjectsView(container, onOpenInScratchpad = null) {
     return maxId + 1;
   };
 
-  // Compute accumulated world offset (x, y) on the 960x640 stage for any node
-  const getNodeWorldStagePos = (project, node) => {
-    let wx = node.x || 0;
-    let wy = node.y || 0;
-    let currParentKey = node.parentKey;
-    while (currParentKey && currParentKey !== 'root') {
-      const pNode = project.nodes.find(n => n.key === currParentKey);
-      if (!pNode) break;
-      wx += (pNode.x || 0);
-      wy += (pNode.y || 0);
-      currParentKey = pNode.parentKey;
+  // Build live Lua code snippet reflecting the node's current name, hierarchy path, sibling order, and transform
+  const buildNodeLuaTransformSnippet = (project, node) => {
+    ensureNodeTransformDefaults(node);
+    if (node.key === 'root') {
+      return `-- Root Container (${node.name}, id:${node.id})\nlocal root = game.FindClientUIRoot("${node.name}")`;
     }
-    return { wx, wy };
+    const siblings = project.nodes.filter(n => n.parentKey === node.parentKey && n.key !== 'root');
+    const sibIndex = Math.max(0, siblings.findIndex(n => n.key === node.key));
+    const lookupLine = node.depth === 1
+      ? `local ctrl = root:GetChild("${node.name}") -- id:${node.id} (sibling #${sibIndex})`
+      : `local ctrl = root:FindChild("${node.uiPath}") -- id:${node.id} (sibling #${sibIndex})`;
+
+    return [
+      lookupLine,
+      `ctrl:SetAnchorMin(${node.anchorMinX.toFixed(2)}, ${node.anchorMinY.toFixed(2)})`,
+      `ctrl:SetAnchorMax(${node.anchorMaxX.toFixed(2)}, ${node.anchorMaxY.toFixed(2)})`,
+      `ctrl:SetPivot(${node.pivotX.toFixed(2)}, ${node.pivotY.toFixed(2)})`,
+      `ctrl:SetAnchoredPosition(${Math.round(node.x || 0)}, ${Math.round(node.y || 0)})`,
+      `ctrl:SetSizeDelta(${Math.round(node.width || 100)}, ${Math.round(node.height || 40)})`,
+      (node.scaleX !== 1 || node.scaleY !== 1 || node.mirrorX || node.mirrorY)
+        ? `ctrl:SetLocalScale(${((node.mirrorX ? -1 : 1) * (node.scaleX || 1)).toFixed(2)}, ${((node.mirrorY ? -1 : 1) * (node.scaleY || 1)).toFixed(2)}, 1)`
+        : null,
+      (node.rotationZ && Math.abs(node.rotationZ) > 0.01)
+        ? `ctrl:SetLocalRotation(0, 0, ${node.rotationZ.toFixed(1)})`
+        : null,
+      ...buildControlSpecificLuaLines(node, project),
+      node.active === false ? `ctrl:SetActive(false)` : null,
+      node.visible === false ? `ctrl:SetVisible(false)` : null
+    ].filter(Boolean).join('\n');
   };
 
-  // Render Dynamic Draggable Static Stage (all scene controls rendered at their 960x640 coordinates)
-  const renderStaticStageHTML = (project, selectedNode) => {
-    const isNodeOrChildSelected = (targetKey) => {
-      if (selectedNode.key === targetKey) return true;
-      return selectedNode.parentKey === targetKey;
-    };
+  // Check if a node or any of its ancestors is inactive/hidden in the hierarchy
+  const isNodeActiveAndVisibleInHierarchy = (project, node) => {
+    let curr = node;
+    while (curr && curr.key !== 'root') {
+      if (curr.active === false || curr.visible === false) return false;
+      curr = curr.parentKey ? project.nodes.find(n => n.key === curr.parentKey) : null;
+    }
+    return true;
+  };
 
-    // Render all visible depth-1 controls PLUS any user-created nested controls
-    const stageNodes = project.nodes.filter(n => {
-      if (n.key === 'root' || n.depth === 0) return false;
-      if (n.key === 'ReferenceControl' && !n.isUserCreated) return false;
-      if (n.depth === 1) return true;
-      return Boolean(n.isUserCreated || n.script);
+  // Find the nearest ancestor ClientUIPresetButtonControl (if node is inside a button's state machine)
+  const findAncestorButton = (project, node) => {
+    let currKey = node ? node.parentKey : null;
+    while (currKey && currKey !== 'root') {
+      const pNode = project.nodes.find(n => n.key === currKey);
+      if (!pNode) break;
+      if (pNode.className === 'ClientUIPresetButtonControl') return pNode;
+      currKey = pNode.parentKey;
+    }
+    return null;
+  };
+
+  // If the user selects a child/descendant of a Button status node in the Hierarchy, automatically flip the Button's preview state to that status branch
+  const autoFlipButtonPreviewForSelectedNode = (project, selectedNode) => {
+    if (!selectedNode || selectedNode.key === 'root') return;
+    let curr = selectedNode;
+    while (curr && curr.parentKey && curr.parentKey !== 'root') {
+      const parent = project.nodes.find(n => n.key === curr.parentKey);
+      if (!parent) break;
+      if (parent.className === 'ClientUIPresetButtonControl') {
+        // curr is the 1-tier direct child of parent button!
+        if (parent.normalStatusNodeKey === curr.key) parent.previewButtonState = 'normal';
+        else if (parent.hoverStatusNodeKey === curr.key) parent.previewButtonState = 'hover';
+        else if (parent.pressedStatusNodeKey === curr.key) parent.previewButtonState = 'pressed';
+        else if (parent.disabledStatusNodeKey === curr.key) parent.previewButtonState = 'disabled';
+        syncButtonStateMachineChildren(project, parent, parent.previewButtonState);
+        break;
+      }
+      curr = parent;
+    }
+  };
+
+  // Compute back-to-front paint order from the Hierarchy tree using Layered Ordering:
+  // Within any parent container, the TOP layer in the hierarchy list (index 0) renders ON TOP (painted last / highest z-index),
+  // and the BOTTOM layer in the hierarchy list (last index) renders AT THE BACK (painted first / lowest z-index).
+  const computeLayeredBackToFrontNodes = (project) => {
+    const childrenByParent = new Map();
+    for (const n of project.nodes) {
+      if (n.key === 'root' || n.depth === 0) continue;
+      const pKey = n.parentKey || 'root';
+      if (!childrenByParent.has(pKey)) childrenByParent.set(pKey, []);
+      childrenByParent.get(pKey).push(n);
+    }
+    const backToFront = [];
+    const visitBackToFront = (parentKey) => {
+      const kids = childrenByParent.get(parentKey) || [];
+      for (let i = kids.length - 1; i >= 0; i--) {
+        const child = kids[i];
+        backToFront.push(child);
+        visitBackToFront(child.key);
+      }
+    };
+    visitBackToFront('root');
+    return backToFront;
+  };
+
+  // Render Dynamic Draggable Static Stage (all scene controls + active gizmo & waypoint triangles)
+  const renderStaticStageHTML = (project, selectedNode) => {
+    // Ensure all nodes in the project have their Basic Transform & Control-Specific defaults initialized
+    project.nodes.forEach(n => {
+      if (n.key !== 'root' && n.depth !== 0) {
+        ensureNodeTransformDefaults(n);
+        ensureControlSpecificDefaults(n);
+      }
     });
 
-    const stageItemsHTML = stageNodes.map(node => {
-      const { wx, wy } = getNodeWorldStagePos(project, node);
-      const w = Math.max(28, node.width || 120);
-      const h = Math.max(24, node.height || 40);
+    // Sync Button State Machine child nodes before filtering stage controls
+    project.nodes.forEach(n => {
+      if (n.className === 'ClientUIPresetButtonControl') {
+        syncButtonStateMachineChildren(project, n);
+      }
+    });
+    autoFlipButtonPreviewForSelectedNode(project, selectedNode);
 
-      // Convert 960x640 center-origin coordinates (x: -480..+480, y: -320..+320 bottom-up) to CSS %
-      const leftPct = 50 + (wx / 960) * 100;
-      const topPct = 50 - (wy / 640) * 100;
-      const widthPct = (w / 960) * 100;
-      const heightPct = (h / 640) * 100;
+    // Order controls in back-to-front layered order (bottom of layer list = back, top of layer list = front)
+    const layeredNodes = computeLayeredBackToFrontNodes(project);
+    const stageNodes = layeredNodes.filter(n => {
+      if (n.key === 'root' || n.depth === 0) return false;
+      if (n.key === 'ReferenceControl' && !n.isUserCreated && n.key !== selectedNode.key) return false;
+      if (n.key === selectedNode.key) return true;
+      return isNodeActiveAndVisibleInHierarchy(project, n);
+    });
 
-      const isSel = isNodeOrChildSelected(node.key);
+    const stageItemsHTML = stageNodes.map((node, orderIdx) => {
+      ensureNodeTransformDefaults(node);
+      ensureControlSpecificDefaults(node);
+      const geom = getNodeStageGeometry(project, node);
+      const isSel = selectedNode.key === node.key;
+      const isHidden = node.visible === false || node.active === false;
+
+      const flipScaleX = node.mirrorX ? -1 : 1;
+      const flipScaleY = node.mirrorY ? -1 : 1;
+      const innerTransform = (flipScaleX !== 1 || flipScaleY !== 1)
+        ? `transform: scale(${flipScaleX}, ${flipScaleY});`
+        : '';
 
       let innerVisual = '';
-      if (node.key === 'Container_with_1Pixel') {
-        innerVisual = `<div class="mw-preset-white-bar"></div>`;
-      } else if (node.key === 'CooldownOrb') {
-        innerVisual = `<div class="mw-preset-orb">✪</div>`;
-      } else if (node.className === 'ClientUIKeyHintControl') {
-        innerVisual = `<div class="mw-preset-keyhint">${escapeHtml(node.text || '1')}</div>`;
+      if (node.className === 'ClientUIImageControl') {
+        innerVisual = renderStageImageVisualHTML(node, innerTransform);
       } else if (node.className === 'ClientUIPresetButtonControl') {
-        innerVisual = `<div class="mw-btn-main-label">${escapeHtml(node.text || node.name)}</div>`;
-      } else if (node.className === 'ClientUITextBoxControl') {
-        innerVisual = `<div class="mw-preset-banner">${escapeHtml(node.text || node.name)}</div>`;
+        innerVisual = renderStageButtonVisualHTML(project, node, innerTransform);
+      } else if (node.className === 'ClientUIKeyHintControl') {
+        innerVisual = renderStageKeyHintVisualHTML(node, innerTransform);
+      } else if (
+        node.className === 'ClientUIFullscreenAnimationControl' ||
+        node.className === 'ClientUIAnimationControl'
+      ) {
+        innerVisual = renderStageAnimationVisualHTML(node, innerTransform);
+      } else if (node.className === 'ClientUIReferenceControl') {
+        innerVisual = renderStageReferenceVisualHTML(node, innerTransform);
+      } else if (node.className === 'ClientUICursorEventAreaControl') {
+        innerVisual = renderStageCursorAreaVisualHTML(node, isSel, innerTransform);
+      } else if (node.className === 'ClientUIGridScrollerControl') {
+        innerVisual = renderStageGridScrollerVisualHTML(node, innerTransform);
+      } else if (
+        node.className === 'ClientUITextBoxControl' ||
+        node.className === 'ClientUITextWindowControl'
+      ) {
+        innerVisual = renderStageTextBoxVisualHTML(node, innerTransform);
+      } else if (node.className === 'ClientUIContainerControl') {
+        // ContainerControl has no fill color in Miliastra; show subtle frame only when selected
+        innerVisual = `<div style="width:100%;height:100%;${isSel ? 'border:1px dashed rgba(245,184,46,0.5);' : ''}${innerTransform}"></div>`;
       } else {
         const col = node.imageColor || node.bgColor || { r: 218, g: 175, b: 78, a: 210 };
-        const bgStr = `rgba(${col.r}, ${col.g}, ${col.b}, ${Math.max(0.35, (col.a !== undefined ? col.a : 220) / 255)})`;
-        innerVisual = `<div style="width:100%;height:100%;background:${bgStr};border:1px solid rgba(255,255,255,0.35);display:flex;align-items:center;justify-content:center;font-size:10px;color:#fff;font-weight:700;">${escapeHtml(node.text || '')}</div>`;
+        const bgStr = `rgba(${col.r}, ${col.g}, ${col.b}, Math.max(0.35, (col.a !== undefined ? col.a : 220) / 255))`;
+        innerVisual = `<div style="width:100%;height:100%;background:${bgStr};border:1px solid rgba(255,255,255,0.35);display:flex;align-items:center;justify-content:center;font-size:10px;color:#fff;font-weight:700;${innerTransform}">${escapeHtml(node.text || node.name)}</div>`;
       }
 
+      const pivotOriginX = (node.pivotX * 100).toFixed(2);
+      const pivotOriginY = ((1 - node.pivotY) * 100).toFixed(2);
+      const rotDeg = -(node.rotationZ || 0);
+
+      // If this node is inside a Button State Machine, let clicks pass through to the Button unless the user explicitly selected that specific child
+      const ancestorBtn = findAncestorButton(project, node);
+      const passThroughToButton = ancestorBtn && !isSel;
+      const pointerStyle = passThroughToButton ? 'pointer-events: none;' : '';
+      const hideChildTag = ancestorBtn && !isSel;
+
+      // Strictly preserve true layer z-index (4 + orderIdx) so top layers ALWAYS render on top of bottom layers
       return `
-        <div class="mw-static-preset ${isSel ? 'selected' : ''}"
+        <div class="mw-static-preset ${isSel ? 'selected' : ''} ${isHidden ? 'is-dimmed-hidden' : ''}"
              data-select-node="${node.key}"
              data-stage-drag-key="${node.key}"
-             title="Drag to position ${escapeHtml(node.name)} (x: ${Math.round(node.x || 0)}, y: ${Math.round(node.y || 0)})"
-             style="left: ${leftPct.toFixed(2)}%; top: ${topPct.toFixed(2)}%; width: ${widthPct.toFixed(2)}%; height: ${heightPct.toFixed(2)}%; transform: translate(-50%, -50%);">
-          <div class="mw-preset-tag-top">${escapeHtml(node.name)} (id:${node.id})${node.script ? ' 📜' : ''}</div>
-          ${innerVisual}
+             title="${escapeHtml(node.name)} (id:${node.id}) — Drag inside box to move, drag edges/corners to scale (Shift=uniform), drag top spinner to rotate, drag cyan dot to move pivot"
+             style="left: ${geom.leftPct.toFixed(2)}%; top: ${geom.topPct.toFixed(2)}%; width: ${geom.widthPct.toFixed(2)}%; height: ${geom.heightPct.toFixed(2)}%; transform-origin: ${pivotOriginX}% ${pivotOriginY}%; transform: rotate(${rotDeg}deg); z-index: ${4 + orderIdx}; ${pointerStyle}">
+          ${!hideChildTag && !isSel ? `<div class="mw-preset-tag-top">${escapeHtml(node.name)} (id:${node.id})${node.script ? ' 📜' : ''}${node.visible === false ? ' [Hidden]' : ''}</div>` : ''}
+          <div class="mw-stage-visual-host" style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;">
+            ${innerVisual}
+          </div>
         </div>
       `;
     }).join('');
 
+    // Render top-level Active Selection Gizmo Overlay at z-index: 38 so gizmo handles & tag are always grabbable on top of all layers
+    let activeSelectionGizmoHTML = '';
+    if (selectedNode && selectedNode.key !== 'root') {
+      ensureNodeTransformDefaults(selectedNode);
+      const selGeom = getNodeStageGeometry(project, selectedNode);
+      const selPivotOriginX = (selectedNode.pivotX * 100).toFixed(2);
+      const selPivotOriginY = ((1 - selectedNode.pivotY) * 100).toFixed(2);
+      const selRotDeg = -(selectedNode.rotationZ || 0);
+      activeSelectionGizmoHTML = `
+        <div class="mw-active-selection-gizmo"
+             id="mw-active-selection-gizmo"
+             data-gizmo-node-key="${selectedNode.key}"
+             data-stage-drag-key="${selectedNode.key}"
+             title="${escapeHtml(selectedNode.name)} (id:${selectedNode.id}) — Drag box to move · Edges/Corners to resize (Shift=Uniform) · Top Spinner to rotate · Cyan ◎ for Center"
+             style="left: ${selGeom.leftPct.toFixed(2)}%; top: ${selGeom.topPct.toFixed(2)}%; width: ${selGeom.widthPct.toFixed(2)}%; height: ${selGeom.heightPct.toFixed(2)}%; transform-origin: ${selPivotOriginX}% ${selPivotOriginY}%; transform: rotate(${selRotDeg}deg); z-index: 38;">
+          <div class="mw-preset-tag-top">${escapeHtml(selectedNode.name)} (id:${selectedNode.id})${selectedNode.script ? ' 📜' : ''}${selectedNode.visible === false ? ' [Hidden]' : ''}</div>
+          ${renderSelectedControlGizmoHandlesHTML(selectedNode)}
+        </div>
+      `;
+    }
+
+    const effScale = (gizmoUiState.baseFitScale || 0.72) * (gizmoUiState.stageZoom || 1.0);
+    const zoomPct = Math.round((gizmoUiState.stageZoom || 1.0) * 100);
+
     return `
-      <div class="mw-stage-workspace">
-        <div class="mw-stage-frame ${selectedNode.key === 'root' ? 'root-selected' : ''}" id="mw-stage-frame" data-select-node="root">
-          <!-- 4 Corner Resize Handles -->
+      <div class="mw-stage-workspace" id="mw-stage-workspace">
+        <!-- Viewport Zoom & Middle-Mouse Pan HUD Bar -->
+        <div class="mw-stage-viewport-hud">
+          <span class="mw-vp-hint" title="Scroll Mouse Wheel to Zoom · Hold Middle Mouse Button (MMB) to Pan">🖱️ Wheel: Zoom · Hold MMB: Pan</span>
+          <div class="mw-vp-zoom-controls">
+            <button type="button" class="mw-vp-btn" id="mw-zoom-out-btn" title="Zoom Out (-15%)">−</button>
+            <span class="mw-vp-zoom-readout" id="mw-zoom-readout" title="Current Viewport Zoom">${zoomPct}%</span>
+            <button type="button" class="mw-vp-btn" id="mw-zoom-in-btn" title="Zoom In (+15%)">+</button>
+            <button type="button" class="mw-vp-btn mw-vp-reset-btn" id="mw-zoom-reset-btn" title="Reset Viewport Zoom & Pan (100% Fit)">1:1 Fit</button>
+          </div>
+        </div>
+
+        <div class="mw-stage-frame ${selectedNode.key === 'root' ? 'root-selected' : ''}"
+             id="mw-stage-frame"
+             data-select-node="root"
+             style="transform: translate(${(gizmoUiState.stagePanX || 0).toFixed(1)}px, ${(gizmoUiState.stagePanY || 0).toFixed(1)}px) scale(${effScale.toFixed(4)});">
+          <!-- 4 Stage Frame Corner Markers -->
           <div class="mw-gizmo-corner tl"></div>
           <div class="mw-gizmo-corner tr"></div>
           <div class="mw-gizmo-corner bl"></div>
@@ -1280,10 +1935,16 @@ export function renderProjectsView(container, onOpenInScratchpad = null) {
           <!-- Center Crosshair Axis Guides -->
           <div class="mw-stage-axis-h"></div>
           <div class="mw-stage-axis-v"></div>
-          <div class="mw-stage-root-label">${escapeHtml(project.rootName)} (id:${project.rootId}) — Drag controls to position</div>
+          <div class="mw-stage-root-label">${escapeHtml(project.rootName)} (id:${project.rootId}) — 960×640 Stage · Top Layer Renders First (On Top)</div>
+
+          <!-- WAYPOINT TRIANGLES & DASHED ALIGNMENT GUIDES FOR SELECTED CONTROL ([img-3, 5, 6, 7, 8]) -->
+          ${renderStageGizmoOverlayHTML(project, selectedNode)}
 
           <!-- STATIC UI CONTROLS SET FOR .LUA INTERACTIONS -->
           ${stageItemsHTML}
+
+          <!-- TOP-LEVEL ACTIVE SELECTION GIZMO OVERLAY -->
+          ${activeSelectionGizmoHTML}
         </div>
       </div>
     `;
@@ -1319,78 +1980,124 @@ export function renderProjectsView(container, onOpenInScratchpad = null) {
     `;
   };
 
-  // Render Clean Right Panel: Index, id, ClassName:handle + Attached .lua Script (or Attach New Script)
+  // Render Right Inspector Panel with [ Basic | Script ] Tabs ([img-2])
   const renderRightInspectorHTML = (project, selectedNode) => {
+    ensureNodeTransformDefaults(selectedNode);
     const defaultScriptPath = selectedNode.key === 'root'
       ? `${selectedNode.name}_Script`
       : selectedNode.uiPath.replace(/\//g, '_');
 
+    const luaTransformSnippet = buildNodeLuaTransformSnippet(project, selectedNode);
+
     return `
       <div class="mw-inspector-header">
-        <div style="display: flex; justify-content: space-between; align-items: center;">
-          <div class="mw-inspector-top-tag">SELECTED NODE & SCRIPT INSPECTOR</div>
-          ${selectedNode.key !== 'root' ? `<button id="mw-delete-node-btn" class="mw-copy-index-btn" title="Delete Control from Hierarchy" style="color: #e07a6b; font-weight: 700;">[ ✕ DELETE ]</button>` : ''}
+        <div style="display: flex; justify-content: space-between; align-items: center; gap: 6px;">
+          <input type="text" id="mw-rename-node-input" class="mw-insp-name-input" value="${escapeHtml(selectedNode.name)}" title="Control Name (used by GetChild / FindChild)" spellcheck="false" autocomplete="off" />
+          ${selectedNode.key !== 'root' ? `<button id="mw-delete-node-btn" class="mw-insp-more-btn" title="Delete Control from Hierarchy">✕</button>` : `<span class="mw-insp-more-btn" title="Root Container">⋯</span>`}
         </div>
-        <div style="display: flex; gap: 6px; align-items: center; margin: 4px 0 6px;">
-          <input type="text" id="mw-rename-node-input" class="mw-script-input" value="${escapeHtml(selectedNode.name)}" title="Control Name (used by GetChild / FindChild)" style="font-weight: 700; font-size: 12.5px;" spellcheck="false" autocomplete="off" />
-        </div>
-        <div class="mw-inspector-index-row">
+
+        <div class="mw-inspector-index-row" style="margin-top: 5px;">
           <span>Index <strong>${selectedNode.prefabIndex}</strong></span>
           <button class="mw-copy-index-btn" data-copy="${selectedNode.prefabIndex}" title="Copy PrefabIndex">📋</button>
-          <span class="mw-inspector-id-tag" title="Runtime Creation Counter (control.id)">id: ${selectedNode.id}</span>
+          <span class="mw-inspector-id-tag" title="Persistent Control ID (unchanged when reordering)">id: ${selectedNode.id}</span>
+          <span class="mw-inspector-id-tag" title="tostring(script.object) Userdata Handle">${selectedNode.className}:${selectedNode.userdataHandle}</span>
         </div>
-        <div style="margin-top: 5px; display: flex; align-items: center; justify-content: space-between; gap: 6px;">
-          <span class="mw-inspector-id-tag" style="display: inline-block;" title="tostring(script.object) Userdata Handle">${selectedNode.className}:${selectedNode.userdataHandle}</span>
-          ${selectedNode.key !== 'root' ? `<span style="font-size: 10px; color: var(--text-muted);" id="mw-insp-pos-readout">X:${Math.round(selectedNode.x || 0)} Y:${Math.round(selectedNode.y || 0)}</span>` : ''}
+
+        <!-- [ Basic | Script ] Pill Switcher ([img-2]) -->
+        <div class="mw-insp-tabs" role="tablist">
+          <button type="button" class="mw-insp-tab-btn ${activeInspectorTab === 'basic' ? 'active' : ''}" data-insp-tab="basic" role="tab" aria-selected="${activeInspectorTab === 'basic'}">
+            Basic
+          </button>
+          <button type="button" class="mw-insp-tab-btn ${activeInspectorTab === 'script' ? 'active' : ''}" data-insp-tab="script" role="tab" aria-selected="${activeInspectorTab === 'script'}">
+            Script ${selectedNode.script ? '●' : ''}
+          </button>
         </div>
       </div>
 
       <div class="mw-inspector-body">
-        <div class="mw-insp-section">
-          <div class="mw-insp-sec-title">
-            <span>📁 .LUA SCRIPT (external_lua_file)</span>
-            <span style="color: ${selectedNode.script ? 'var(--accent-gold)' : 'var(--text-muted)'}; font-size: 10px;">
-              ${selectedNode.script ? '● ATTACHED' : '○ NONE'}
-            </span>
-          </div>
-
-          ${selectedNode.script ? `
-            <!-- Clickable .lua File Card on the Right Side -->
-            <div class="mw-lua-file-item ${activeLuaFileNodeKey === selectedNode.key ? 'active' : ''}" id="mw-right-lua-card" data-lua-node-key="${selectedNode.key}" title="Click to view/edit .lua script in center">
-              <span class="mw-lua-file-icon">📜</span>
-              <div class="mw-lua-file-meta">
-                <div class="mw-lua-file-name">${escapeHtml(selectedNode.script.filename || (selectedNode.script.path + '.lua'))}</div>
-                <div class="mw-lua-file-sub">script.path: "${escapeHtml(selectedNode.script.path)}" | script.id: ${selectedNode.script.id}</div>
+        ${activeInspectorTab === 'basic'
+          ? (
+              renderBasicInspectorTabHTML(
+                project,
+                selectedNode,
+                gizmoUiState.waypointPopoverOpen,
+                gizmoUiState.transformCollapsed,
+                gizmoUiState.createCollapsed
+              ) +
+              renderControlSpecificInspectorHTML(
+                project,
+                selectedNode,
+                gizmoUiState
+              )
+            )
+          : `
+            <div class="mw-insp-section">
+              <div class="mw-insp-sec-title">
+                <span>📁 .LUA SCRIPT (external_lua_file)</span>
+                <span style="color: ${selectedNode.script ? 'var(--accent-gold)' : 'var(--text-muted)'}; font-size: 10px;">
+                  ${selectedNode.script ? '● ATTACHED' : '○ NONE'}
+                </span>
               </div>
+
+              ${selectedNode.script ? `
+                <!-- Clickable .lua File Card on the Right Side -->
+                <div class="mw-lua-file-item ${activeLuaFileNodeKey === selectedNode.key ? 'active' : ''}" id="mw-right-lua-card" data-lua-node-key="${selectedNode.key}" title="Click to view/edit .lua script in center">
+                  <span class="mw-lua-file-icon">📜</span>
+                  <div class="mw-lua-file-meta">
+                    <div class="mw-lua-file-name">${escapeHtml(selectedNode.script.filename || (selectedNode.script.path + '.lua'))}</div>
+                    <div class="mw-lua-file-sub">script.path: "${escapeHtml(selectedNode.script.path)}" | script.id: ${selectedNode.script.id}</div>
+                  </div>
+                </div>
+
+                <div style="display: flex; gap: 6px; margin-top: 10px;">
+                  <button class="brutal-btn brutal-btn-gold" id="mw-open-script-center-btn" style="flex: 1; justify-content: center; padding: 5px 8px; font-size: 11px;">
+                    [ 📜 ${activeLuaFileNodeKey === selectedNode.key ? 'EDITING IN CENTER' : 'OPEN .LUA IN CENTER'} ]
+                  </button>
+                  <button class="brutal-btn" id="mw-detach-script-btn" title="Detach script from ${escapeHtml(selectedNode.name)}" style="padding: 5px 8px; font-size: 11px; color: #e07a6b;">
+                    [ ✕ ]
+                  </button>
+                </div>
+              ` : `
+                <!-- Attach a Script to this Node -->
+                <div style="font-size: 11px; color: var(--text-muted); margin-bottom: 10px;">
+                  No script attached to <strong>${escapeHtml(selectedNode.name)}</strong>.
+                </div>
+
+                <label class="mw-insp-label" for="mw-attach-script-path">script.path (for GetScriptByPath):</label>
+                <input type="text" id="mw-attach-script-path" class="mw-script-input" value="${escapeHtml(defaultScriptPath)}" spellcheck="false" autocomplete="off" />
+
+                <button class="brutal-btn brutal-btn-gold" id="mw-attach-script-btn" style="width: 100%; justify-content: center; margin-top: 10px; padding: 6px 10px; font-size: 11px;">
+                  [ + ATTACH .LUA SCRIPT ]
+                </button>
+              `}
             </div>
 
-            <div style="display: flex; gap: 6px; margin-top: 10px;">
-              <button class="brutal-btn brutal-btn-gold" id="mw-open-script-center-btn" style="flex: 1; justify-content: center; padding: 5px 8px; font-size: 11px;">
-                [ 📜 ${activeLuaFileNodeKey === selectedNode.key ? 'EDITING IN CENTER' : 'OPEN .LUA IN CENTER'} ]
-              </button>
-              <button class="brutal-btn" id="mw-detach-script-btn" title="Detach script from ${escapeHtml(selectedNode.name)}" style="padding: 5px 8px; font-size: 11px; color: #e07a6b;">
-                [ ✕ ]
-              </button>
+            <!-- Live Hierarchy & Transform Lua Code Reflection -->
+            <div class="mw-insp-section">
+              <div class="mw-insp-sec-title">
+                <span>⚡ LIVE LUA HIERARCHY & TRANSFORM CODE</span>
+                <button class="mw-copy-index-btn" data-copy="${escapeHtml(luaTransformSnippet)}" title="Copy Lua Transform Snippet" style="font-size: 10px; color: var(--accent-gold);">[ COPY ]</button>
+              </div>
+              <div style="font-size: 10px; color: var(--text-muted); margin-bottom: 6px;">
+                Reflects current hierarchy path (<code>${escapeHtml(selectedNode.uiPath)}</code>), sibling order, waypoints, pivot, and transform:
+              </div>
+              <pre class="mw-insp-code-snippet">${escapeHtml(luaTransformSnippet)}</pre>
             </div>
-          ` : `
-            <!-- Attach a Script to this Node -->
-            <div style="font-size: 11px; color: var(--text-muted); margin-bottom: 10px;">
-              No script attached to <strong>${escapeHtml(selectedNode.name)}</strong>.
-            </div>
-
-            <label class="mw-insp-label" for="mw-attach-script-path">script.path (for GetScriptByPath):</label>
-            <input type="text" id="mw-attach-script-path" class="mw-script-input" value="${escapeHtml(defaultScriptPath)}" spellcheck="false" autocomplete="off" />
-
-            <button class="brutal-btn brutal-btn-gold" id="mw-attach-script-btn" style="width: 100%; justify-content: center; margin-top: 10px; padding: 6px 10px; font-size: 11px;">
-              [ + ATTACH .LUA SCRIPT ]
-            </button>
-          `}
-        </div>
+          `
+        }
       </div>
     `;
   };
 
   const render = () => {
+    // Preserve scroll positions of Right Inspector, Left Hierarchy, and Side Selector Panel so clicking never jumps
+    const prevInspBody = container.querySelector('.mw-inspector-body');
+    const savedInspScrollTop = prevInspBody ? prevInspBody.scrollTop : 0;
+    const prevHierScroll = container.querySelector('#mw-hierarchy-scroll');
+    const savedHierScrollTop = prevHierScroll ? prevHierScroll.scrollTop : 0;
+    const prevSideList = container.querySelector('#mw-side-selector-list');
+    const savedSideScrollTop = prevSideList ? prevSideList.scrollTop : 0;
+
     const project = getActiveProject();
     normalizeProjectHierarchy(project);
     const selectedNode = getSelectedNode();
@@ -1436,14 +2143,14 @@ export function renderProjectsView(container, onOpenInScratchpad = null) {
 
         <!-- 3-COLUMN MILIASTRA EDITOR WORKSPACE -->
         <div class="mw-editor-columns">
-          <!-- LEFT COLUMN: Search + Add UIControl + Drag-and-Drop Nested Hierarchy Tree -->
+          <!-- LEFT COLUMN: Search + Add UIControl + Drag-and-Drop Reorderable & Reparentable Hierarchy Tree -->
           <div class="mw-left-hierarchy">
             <div class="mw-tree-search-row">
               <div class="mw-tree-search-box">
                 <span class="mw-search-svg-wrap">${SEARCH_SVG_ICON}</span>
                 <input type="text" id="mw-tree-search-input" placeholder="Filter hierarchy..." value="${escapeHtml(treeSearchQuery)}" autocomplete="off" spellcheck="false" />
               </div>
-              <span class="mw-tree-filter-btn" title="Drag & Drop nodes to reparent">⧩</span>
+              <span class="mw-tree-filter-btn" title="Drag between nodes to reorder or drop onto a node to reparent">⧩</span>
             </div>
 
             <!-- Add New UIControl Bar -->
@@ -1471,12 +2178,18 @@ export function renderProjectsView(container, onOpenInScratchpad = null) {
                   <div class="mw-tree-item ${isSelected ? 'selected' : ''}"
                        data-node-key="${node.key}"
                        draggable="${isDraggable ? 'true' : 'false'}"
-                       title="${isDraggable ? 'Click to inspect • Drag onto another node to reparent' : 'Root Container (Drop nodes here to parent under Root)'}"
+                       title="${isDraggable ? `id:${node.id} • Drag top/bottom edge to reorder siblings, or center to reparent inside folder` : 'Root Container (Drop nodes here to parent under Root)'}"
                        style="padding-left: ${6 + indent}px;">
                     <span class="mw-tree-caret ${nodeHasChildren ? 'clickable' : ''}" data-toggle-key="${nodeHasChildren ? node.key : ''}" title="${nodeHasChildren ? 'Expand / Collapse Children' : ''}">${actualCaret}</span>
                     <span class="mw-tree-icon">${node.icon}</span>
                     <span class="mw-tree-label">${escapeHtml(node.name)}</span>
-                    ${node.script ? `<span class="mw-tree-script-badge" data-open-script-key="${node.key}" title="Click to view/edit ${escapeHtml(node.script.filename)}">📜 ${escapeHtml(node.script.path)}</span>` : ''}
+                    ${node.script ? `<span class="mw-tree-script-badge" data-open-script-key="${node.key}" title="Attached Script: ${escapeHtml(node.script.filename)} (Click to view/edit)">📜</span>` : ''}
+                    ${isDraggable ? `
+                      <span class="mw-tree-reorder-btns">
+                        <button type="button" class="mw-tree-mini-btn" data-tree-move-dir="up" data-tree-move-key="${node.key}" title="Move Up (switch places with previous sibling; id:${node.id} unchanged)">▲</button>
+                        <button type="button" class="mw-tree-mini-btn" data-tree-move-dir="down" data-tree-move-key="${node.key}" title="Move Down (switch places with next sibling; id:${node.id} unchanged)">▼</button>
+                      </span>
+                    ` : ''}
                   </div>
                 `;
               }).join('')}
@@ -1488,13 +2201,33 @@ export function renderProjectsView(container, onOpenInScratchpad = null) {
             ${centerContentHTML}
           </div>
 
-          <!-- RIGHT COLUMN: Clean Node Header + Attached Script / Attach Script Button -->
+          <!-- DETACHED SIDE SELECTOR BLOCK NEXT TO RIGHT MENU ([img-5]) -->
+          ${activeInspectorTab === 'basic' ? renderSideSelectorPanelHTML(project, selectedNode, gizmoUiState) : ''}
+
+          <!-- RIGHT COLUMN: [ Basic | Script ] Inspector -->
           <div class="mw-right-inspector" id="mw-inspector-mount">
             ${renderRightInspectorHTML(project, selectedNode)}
           </div>
         </div>
+
+        <!-- BOTTOM 1/3 SCREEN IMAGE ASSET LIBRARY SELECTOR DRAWER ([img-3], [img-4]) -->
+        ${renderBottomAssetLibraryDrawerHTML(selectedNode, gizmoUiState)}
       </div>
     `;
+
+    // Restore scroll positions immediately before paint
+    const nextInspBody = container.querySelector('.mw-inspector-body');
+    if (nextInspBody && savedInspScrollTop > 0) {
+      nextInspBody.scrollTop = savedInspScrollTop;
+    }
+    const nextHierScroll = container.querySelector('#mw-hierarchy-scroll');
+    if (nextHierScroll && savedHierScrollTop > 0) {
+      nextHierScroll.scrollTop = savedHierScrollTop;
+    }
+    const nextSideList = container.querySelector('#mw-side-selector-list');
+    if (nextSideList && savedSideScrollTop > 0) {
+      nextSideList.scrollTop = savedSideScrollTop;
+    }
 
     bindWorkspaceEvents();
   };
@@ -1503,9 +2236,18 @@ export function renderProjectsView(container, onOpenInScratchpad = null) {
     const inspMount = container.querySelector('#mw-inspector-mount');
     if (!inspMount) return;
 
+    // Switch between [ Basic | Script ] tabs ([img-2])
+    inspMount.querySelectorAll('[data-insp-tab]').forEach(tabBtn => {
+      tabBtn.addEventListener('click', () => {
+        activeInspectorTab = tabBtn.dataset.inspTab;
+        gizmoUiState.waypointPopoverOpen = false;
+        render();
+      });
+    });
+
     inspMount.querySelectorAll('.mw-copy-index-btn[data-copy]').forEach(btn => {
       btn.addEventListener('click', () => {
-        copyToClipboard(btn.dataset.copy, 'PrefabIndex');
+        copyToClipboard(btn.dataset.copy, 'Snippet / Index');
       });
     });
 
@@ -1612,6 +2354,28 @@ export function renderProjectsView(container, onOpenInScratchpad = null) {
 
   const bindWorkspaceEvents = () => {
     bindInspectorEvents();
+    bindTransformAndStageGizmoEvents({
+      container,
+      getActiveProject,
+      getSelectedNode,
+      setSelectedNodeKey: (k) => { selectedNodeKey = k; },
+      clearActiveLuaFile: () => { activeLuaFileNodeKey = null; },
+      isDescendantOf,
+      normalizeProjectHierarchy,
+      state: gizmoUiState,
+      render,
+      showToast
+    });
+    bindControlSpecificInspectorEvents({
+      container,
+      project: getActiveProject(),
+      selectedNode: getSelectedNode(),
+      setSelectedNodeKey: (k) => { selectedNodeKey = k; },
+      normalizeProjectHierarchy,
+      state: gizmoUiState,
+      render,
+      showToast
+    });
 
     // Project dropdown selector
     const projSelect = container.querySelector('#mw-project-select');
@@ -1621,6 +2385,7 @@ export function renderProjectsView(container, onOpenInScratchpad = null) {
         const proj = getActiveProject();
         selectedNodeKey = (proj.nodes.find(n => n.script)?.key) || 'root';
         activeLuaFileNodeKey = null;
+        gizmoUiState.waypointPopoverOpen = false;
         collapsedNodeKeys.clear();
         render();
       });
@@ -1652,7 +2417,7 @@ export function renderProjectsView(container, onOpenInScratchpad = null) {
         const initX = parentKey === 'root' ? ((offsetCount % 3) - 1) * 90 : 0;
         const initY = parentKey === 'root' ? 40 - (offsetCount * 28) % 140 : 0;
 
-        const newNode = {
+        const newNode = ensureNodeTransformDefaults({
           key: uniqueKey,
           parentKey,
           id: nextId,
@@ -1668,6 +2433,7 @@ export function renderProjectsView(container, onOpenInScratchpad = null) {
           width: preset.width,
           height: preset.height,
           visible: true,
+          active: true,
           raycastTarget: Boolean(preset.raycastTarget),
           interactable: preset.interactable !== false,
           bgColor: preset.bgColor ? { ...preset.bgColor } : undefined,
@@ -1680,9 +2446,164 @@ export function renderProjectsView(container, onOpenInScratchpad = null) {
           referencedPrefabIndex: preset.referencedPrefabIndex,
           isUserCreated: true,
           script: null
-        };
+        });
 
         project.nodes.push(newNode);
+
+        // If adding a ClientUIPresetButtonControl, scaffold its default 1-tier Normal & Hover status child containers
+        if (newNode.className === 'ClientUIPresetButtonControl') {
+          const w = newNode.width || 156;
+          const h = newNode.height || 44;
+          const baseId = nextId + 1;
+          const baseH = nextHandle + 7;
+          const normContKey = `node_${Date.now()}_${baseId}`;
+          const normBgKey = `node_${Date.now()}_${baseId + 1}`;
+          const normTxtKey = `node_${Date.now()}_${baseId + 2}`;
+          const hovContKey = `node_${Date.now()}_${baseId + 3}`;
+          const hovBgKey = `node_${Date.now()}_${baseId + 4}`;
+          const hovTxtKey = `node_${Date.now()}_${baseId + 5}`;
+
+          project.nodes.push(
+            ensureNodeTransformDefaults({
+              key: normContKey,
+              parentKey: newNode.key,
+              id: baseId,
+              userdataHandle: baseH,
+              depth: newNode.depth + 1,
+              icon: '□',
+              name: 'Normal_Container',
+              className: 'ClientUIContainerControl',
+              prefabIndex: 1073741852,
+              x: 0,
+              y: 0,
+              width: w,
+              height: h,
+              active: true,
+              visible: true,
+              isUserCreated: true,
+              script: null
+            }),
+            ensureNodeTransformDefaults({
+              key: normTxtKey,
+              parentKey: normContKey,
+              id: baseId + 2,
+              userdataHandle: baseH + 14,
+              depth: newNode.depth + 2,
+              icon: 'T',
+              name: 'Normal_Label',
+              className: 'ClientUITextBoxControl',
+              prefabIndex: 1073741849,
+              x: 0,
+              y: 0,
+              width: w,
+              height: h,
+              text: `Button (${nextId})`,
+              fontSize: 14,
+              alignH: 'center',
+              alignV: 'middle',
+              fontColor: { r: 245, g: 238, b: 220, a: 255 },
+              bgColor: { r: 0, g: 0, b: 0, a: 0 },
+              active: true,
+              visible: true,
+              isUserCreated: true,
+              script: null
+            }),
+            ensureNodeTransformDefaults({
+              key: normBgKey,
+              parentKey: normContKey,
+              id: baseId + 1,
+              userdataHandle: baseH + 7,
+              depth: newNode.depth + 2,
+              icon: '▣',
+              name: 'Normal_Bg',
+              className: 'ClientUIImageControl',
+              prefabIndex: 1073741850,
+              x: 0,
+              y: 0,
+              width: w,
+              height: h,
+              resourceId: 100001,
+              imageColor: { r: 58, g: 48, b: 36, a: 245 },
+              active: true,
+              visible: true,
+              isUserCreated: true,
+              script: null
+            }),
+            ensureNodeTransformDefaults({
+              key: hovContKey,
+              parentKey: newNode.key,
+              id: baseId + 3,
+              userdataHandle: baseH + 21,
+              depth: newNode.depth + 1,
+              icon: '□',
+              name: 'Hover_Container',
+              className: 'ClientUIContainerControl',
+              prefabIndex: 1073741852,
+              x: 0,
+              y: 0,
+              width: w,
+              height: h,
+              active: false,
+              visible: false,
+              isUserCreated: true,
+              script: null
+            }),
+            ensureNodeTransformDefaults({
+              key: hovTxtKey,
+              parentKey: hovContKey,
+              id: baseId + 5,
+              userdataHandle: baseH + 35,
+              depth: newNode.depth + 2,
+              icon: 'T',
+              name: 'Hover_Label',
+              className: 'ClientUITextBoxControl',
+              prefabIndex: 1073741849,
+              x: 0,
+              y: 0,
+              width: w,
+              height: h,
+              text: `<b>▶ Button (${nextId}) ◀</b>`,
+              fontSize: 14,
+              alignH: 'center',
+              alignV: 'middle',
+              fontColor: { r: 255, g: 235, b: 175, a: 255 },
+              bgColor: { r: 0, g: 0, b: 0, a: 0 },
+              active: true,
+              visible: true,
+              isUserCreated: true,
+              script: null
+            }),
+            ensureNodeTransformDefaults({
+              key: hovBgKey,
+              parentKey: hovContKey,
+              id: baseId + 4,
+              userdataHandle: baseH + 28,
+              depth: newNode.depth + 2,
+              icon: '▣',
+              name: 'Hover_Bg',
+              className: 'ClientUIImageControl',
+              prefabIndex: 1073741850,
+              x: 0,
+              y: 0,
+              width: w,
+              height: h,
+              resourceId: 100001,
+              imageColor: { r: 122, g: 92, b: 44, a: 255 },
+              active: true,
+              visible: true,
+              isUserCreated: true,
+              script: null
+            })
+          );
+
+          newNode.normalStatusNodeKey = normContKey;
+          newNode.hoverStatusNodeKey = hovContKey;
+          newNode.previewButtonState = 'normal';
+          collapsedNodeKeys.add(normContKey);
+          collapsedNodeKeys.add(hovContKey);
+          syncButtonStateMachineChildren(project, newNode, 'normal');
+        }
+
         collapsedNodeKeys.delete(parentKey);
         normalizeProjectHierarchy(project);
         selectedNodeKey = newNode.key;
@@ -1729,16 +2650,45 @@ export function renderProjectsView(container, onOpenInScratchpad = null) {
         const key = badge.dataset.openScriptKey;
         selectedNodeKey = key;
         activeLuaFileNodeKey = key;
+        activeInspectorTab = 'script';
         render();
       });
     });
 
-    // Left Hierarchy UI Control click + Drag-and-Drop Reparenting
+    // Quick inline ▲ / ▼ sibling switch buttons on hierarchy rows (keeps id unchanged)
+    container.querySelectorAll('[data-tree-move-key]').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const key = btn.dataset.treeMoveKey;
+        const dir = btn.dataset.treeMoveDir;
+        const proj = getActiveProject();
+        const node = proj.nodes.find(n => n.key === key);
+        if (!node || node.key === 'root') return;
+
+        const siblings = proj.nodes.filter(n => n.parentKey === node.parentKey && n.key !== 'root');
+        const idx = siblings.findIndex(n => n.key === node.key);
+        const swapSibling = dir === 'up' ? siblings[idx - 1] : siblings[idx + 1];
+        if (!swapSibling) return;
+
+        const aIdx = proj.nodes.indexOf(node);
+        const bIdx = proj.nodes.indexOf(swapSibling);
+        if (aIdx !== -1 && bIdx !== -1) {
+          proj.nodes[aIdx] = swapSibling;
+          proj.nodes[bIdx] = node;
+          normalizeProjectHierarchy(proj);
+          selectedNodeKey = node.key;
+          render();
+        }
+      });
+    });
+
+    // Left Hierarchy UI Control click + Drag-and-Drop Reordering (before/after) & Reparenting (inside)
     let draggedTreeKey = null;
     container.querySelectorAll('.mw-tree-item').forEach(row => {
       row.addEventListener('click', () => {
         selectedNodeKey = row.dataset.nodeKey;
         activeLuaFileNodeKey = null;
+        gizmoUiState.waypointPopoverOpen = false;
         render();
       });
 
@@ -1759,7 +2709,9 @@ export function renderProjectsView(container, onOpenInScratchpad = null) {
       row.addEventListener('dragend', () => {
         draggedTreeKey = null;
         row.classList.remove('dragging');
-        container.querySelectorAll('.mw-tree-item.drag-over-target').forEach(el => el.classList.remove('drag-over-target'));
+        container.querySelectorAll('.mw-tree-item').forEach(el => {
+          el.classList.remove('drag-over-target', 'drag-over-before', 'drag-over-after');
+        });
       });
 
       row.addEventListener('dragover', (e) => {
@@ -1771,17 +2723,32 @@ export function renderProjectsView(container, onOpenInScratchpad = null) {
 
         e.preventDefault();
         if (e.dataTransfer) e.dataTransfer.dropEffect = 'move';
-        row.classList.add('drag-over-target');
+
+        const r = row.getBoundingClientRect();
+        const relY = (e.clientY - r.top) / Math.max(1, r.height);
+        row.classList.remove('drag-over-target', 'drag-over-before', 'drag-over-after');
+
+        if (targetKey === 'root') {
+          row.classList.add('drag-over-target');
+        } else if (relY < 0.26) {
+          row.classList.add('drag-over-before');
+        } else if (relY > 0.74) {
+          row.classList.add('drag-over-after');
+        } else {
+          row.classList.add('drag-over-target');
+        }
       });
 
       row.addEventListener('dragleave', () => {
-        row.classList.remove('drag-over-target');
+        row.classList.remove('drag-over-target', 'drag-over-before', 'drag-over-after');
       });
 
       row.addEventListener('drop', (e) => {
         e.preventDefault();
         e.stopPropagation();
-        row.classList.remove('drag-over-target');
+        const dropBefore = row.classList.contains('drag-over-before');
+        const dropAfter = row.classList.contains('drag-over-after');
+        row.classList.remove('drag-over-target', 'drag-over-before', 'drag-over-after');
 
         const targetKey = row.dataset.nodeKey;
         const sourceKey = draggedTreeKey || (e.dataTransfer && e.dataTransfer.getData('text/plain'));
@@ -1794,22 +2761,141 @@ export function renderProjectsView(container, onOpenInScratchpad = null) {
         const targetNode = proj.nodes.find(n => n.key === targetKey);
         if (!sourceNode || !targetNode) return;
 
-        sourceNode.parentKey = targetNode.key;
-        collapsedNodeKeys.delete(targetNode.key);
-        normalizeProjectHierarchy(proj);
-        selectedNodeKey = sourceNode.key;
-        render();
-        showToast(`Moved ${sourceNode.name} inside ${targetNode.name}`);
+        if ((dropBefore || dropAfter) && targetNode.key !== 'root') {
+          // Reorder as sibling before or after targetNode (preserving id!)
+          sourceNode.parentKey = targetNode.parentKey || 'root';
+          proj.nodes = proj.nodes.filter(n => n.key !== sourceNode.key);
+          const targetIdx = proj.nodes.findIndex(n => n.key === targetNode.key);
+          const insertIdx = dropBefore ? targetIdx : targetIdx + 1;
+          proj.nodes.splice(Math.max(1, insertIdx), 0, sourceNode);
+          normalizeProjectHierarchy(proj);
+          selectedNodeKey = sourceNode.key;
+          render();
+          showToast(`Reordered ${sourceNode.name} ${dropBefore ? 'before' : 'after'} ${targetNode.name}`);
+        } else {
+          // Reparent inside targetNode
+          sourceNode.parentKey = targetNode.key;
+          collapsedNodeKeys.delete(targetNode.key);
+          normalizeProjectHierarchy(proj);
+          selectedNodeKey = sourceNode.key;
+          render();
+          showToast(`Moved ${sourceNode.name} inside ${targetNode.name}`);
+        }
       });
     });
 
-    // Center Static Stage: Click to Select + Drag-and-Drop to Position UIControl on Stage
+    // Center Static Stage: Viewport Zoom (Wheel / HUD buttons), Middle-Mouse-Button Pan, Click to Select, & Drag to Move
+    const stageWorkspace = container.querySelector('#mw-stage-workspace');
     const stageFrame = container.querySelector('#mw-stage-frame');
+
+    const applyStageViewportTransform = () => {
+      if (!stageFrame || !stageWorkspace) return;
+      const wsRect = stageWorkspace.getBoundingClientRect();
+      if (wsRect.width > 80 && wsRect.height > 80) {
+        const fitW = (wsRect.width - 36) / STAGE_WIDTH;
+        const fitH = (wsRect.height - 52) / STAGE_HEIGHT;
+        gizmoUiState.baseFitScale = Math.max(0.32, Math.min(1.15, Math.min(fitW, fitH)));
+      }
+      const effScale = (gizmoUiState.baseFitScale || 0.72) * (gizmoUiState.stageZoom || 1.0);
+      stageFrame.style.transform = `translate(${(gizmoUiState.stagePanX || 0).toFixed(1)}px, ${(gizmoUiState.stagePanY || 0).toFixed(1)}px) scale(${effScale.toFixed(4)})`;
+      const zoomReadout = container.querySelector('#mw-zoom-readout');
+      if (zoomReadout) {
+        zoomReadout.textContent = `${Math.round((gizmoUiState.stageZoom || 1.0) * 100)}%`;
+      }
+    };
+
+    if (stageWorkspace && stageFrame) {
+      applyStageViewportTransform();
+
+      // Mouse Wheel Zoom on Viewport (zooms smoothly toward cursor position)
+      stageWorkspace.addEventListener('wheel', (e) => {
+        e.preventDefault();
+        const prevZoom = gizmoUiState.stageZoom || 1.0;
+        const zoomFactor = e.deltaY < 0 ? 1.12 : 1 / 1.12;
+        const nextZoom = Math.max(0.35, Math.min(3.5, Math.round(prevZoom * zoomFactor * 100) / 100));
+        if (Math.abs(nextZoom - prevZoom) < 0.001) return;
+
+        // Adjust pan so point under cursor stays anchored while zooming
+        const wsRect = stageWorkspace.getBoundingClientRect();
+        const cursorRelX = e.clientX - (wsRect.left + wsRect.width * 0.5);
+        const cursorRelY = e.clientY - (wsRect.top + wsRect.height * 0.5);
+        const ratio = nextZoom / prevZoom;
+        gizmoUiState.stagePanX = cursorRelX - (cursorRelX - (gizmoUiState.stagePanX || 0)) * ratio;
+        gizmoUiState.stagePanY = cursorRelY - (cursorRelY - (gizmoUiState.stagePanY || 0)) * ratio;
+        gizmoUiState.stageZoom = nextZoom;
+        applyStageViewportTransform();
+      }, { passive: false });
+
+      // Hold Middle Mouse Button (e.button === 1) to Pan Viewport
+      stageWorkspace.addEventListener('mousedown', (e) => {
+        if (e.button !== 1) return;
+        e.preventDefault();
+        e.stopPropagation();
+
+        const startX = e.clientX;
+        const startY = e.clientY;
+        const startPanX = gizmoUiState.stagePanX || 0;
+        const startPanY = gizmoUiState.stagePanY || 0;
+        stageWorkspace.classList.add('is-panning');
+
+        const onPanMove = (moveEvt) => {
+          gizmoUiState.stagePanX = startPanX + (moveEvt.clientX - startX);
+          gizmoUiState.stagePanY = startPanY + (moveEvt.clientY - startY);
+          applyStageViewportTransform();
+        };
+
+        const onPanUp = () => {
+          stageWorkspace.classList.remove('is-panning');
+          window.removeEventListener('mousemove', onPanMove);
+          window.removeEventListener('mouseup', onPanUp);
+        };
+
+        window.addEventListener('mousemove', onPanMove);
+        window.addEventListener('mouseup', onPanUp);
+      });
+
+      // Prevent default browser middle-click autoscroll behavior
+      stageWorkspace.addEventListener('auxclick', (e) => {
+        if (e.button === 1) e.preventDefault();
+      });
+
+      // Zoom HUD Buttons (- / + / 1:1 Fit)
+      const zoomOutBtn = container.querySelector('#mw-zoom-out-btn');
+      if (zoomOutBtn) {
+        zoomOutBtn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          gizmoUiState.stageZoom = Math.max(0.35, Math.round(((gizmoUiState.stageZoom || 1.0) - 0.15) * 100) / 100);
+          applyStageViewportTransform();
+        });
+      }
+
+      const zoomInBtn = container.querySelector('#mw-zoom-in-btn');
+      if (zoomInBtn) {
+        zoomInBtn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          gizmoUiState.stageZoom = Math.min(3.5, Math.round(((gizmoUiState.stageZoom || 1.0) + 0.15) * 100) / 100);
+          applyStageViewportTransform();
+        });
+      }
+
+      const zoomResetBtn = container.querySelector('#mw-zoom-reset-btn');
+      if (zoomResetBtn) {
+        zoomResetBtn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          gizmoUiState.stageZoom = 1.0;
+          gizmoUiState.stagePanX = 0;
+          gizmoUiState.stagePanY = 0;
+          applyStageViewportTransform();
+        });
+      }
+    }
+
     if (stageFrame) {
       stageFrame.addEventListener('click', (e) => {
         if (e.target === stageFrame) {
           selectedNodeKey = 'root';
           activeLuaFileNodeKey = null;
+          gizmoUiState.waypointPopoverOpen = false;
           render();
         }
       });
@@ -1817,12 +2903,17 @@ export function renderProjectsView(container, onOpenInScratchpad = null) {
       container.querySelectorAll('[data-stage-drag-key]').forEach(presetEl => {
         presetEl.addEventListener('mousedown', (e) => {
           if (e.button !== 0) return;
+          // Ignore if mousedown happened on a resize edge/corner, rotation spinner, or pivot dot
+          if (e.target.closest('[data-resize-dir], [data-gizmo-rotate], [data-gizmo-pivot]')) {
+            return;
+          }
           e.stopPropagation();
 
           const nodeKey = presetEl.dataset.stageDragKey;
           const proj = getActiveProject();
           const node = proj.nodes.find(n => n.key === nodeKey);
           if (!node) return;
+          ensureNodeTransformDefaults(node);
 
           const startMouseX = e.clientX;
           const startMouseY = e.clientY;
@@ -1840,21 +2931,37 @@ export function renderProjectsView(container, onOpenInScratchpad = null) {
             if (!moved || rect.width <= 0 || rect.height <= 0) return;
 
             // Convert pixel delta to 960x640 Miliastra stage coordinates (Y is bottom-up!)
-            const deltaStageX = (dxPx / rect.width) * 960;
-            const deltaStageY = -(dyPx / rect.height) * 640;
+            const deltaStageX = (dxPx / rect.width) * STAGE_WIDTH;
+            const deltaStageY = -(dyPx / rect.height) * STAGE_HEIGHT;
 
-            node.x = Math.round(Math.max(-450, Math.min(450, startNodeX + deltaStageX)));
-            node.y = Math.round(Math.max(-290, Math.min(290, startNodeY + deltaStageY)));
+            node.x = Math.round((startNodeX + deltaStageX) * 100) / 100;
+            node.y = Math.round((startNodeY + deltaStageY) * 100) / 100;
 
-            const { wx, wy } = getNodeWorldStagePos(proj, node);
-            const leftPct = 50 + (wx / 960) * 100;
-            const topPct = 50 - (wy / 640) * 100;
-            presetEl.style.left = `${leftPct.toFixed(2)}%`;
-            presetEl.style.top = `${topPct.toFixed(2)}%`;
+            const geom = getNodeStageGeometry(proj, node);
+            container.querySelectorAll(`[data-stage-drag-key="${node.key}"]`).forEach(el => {
+              el.style.left = `${geom.leftPct.toFixed(2)}%`;
+              el.style.top = `${geom.topPct.toFixed(2)}%`;
+            });
 
-            const posReadout = container.querySelector('#mw-insp-pos-readout');
-            if (posReadout && selectedNodeKey === node.key) {
-              posReadout.textContent = `X:${node.x} Y:${node.y}`;
+            // Also move any descendant elements on stage 1:1 in real time
+            for (const descNode of proj.nodes) {
+              if (descNode.key === node.key || descNode.key === 'root') continue;
+              if (isDescendantOf(proj, descNode.key, node.key)) {
+                const dGeom = getNodeStageGeometry(proj, descNode);
+                container.querySelectorAll(`[data-stage-drag-key="${descNode.key}"]`).forEach(dEl => {
+                  dEl.style.left = `${dGeom.leftPct.toFixed(2)}%`;
+                  dEl.style.top = `${dGeom.topPct.toFixed(2)}%`;
+                });
+              }
+            }
+
+            if (selectedNodeKey === node.key) {
+              const locXInput = container.querySelector('#mw-inp-loc-x');
+              const locYInput = container.querySelector('#mw-inp-loc-y');
+              const locX = 800 + node.x * (1600 / STAGE_WIDTH);
+              const locY = 450 + node.y * (900 / STAGE_HEIGHT);
+              if (locXInput) locXInput.value = locX.toFixed(2);
+              if (locYInput) locYInput.value = locY.toFixed(2);
             }
           };
 
@@ -1863,6 +2970,7 @@ export function renderProjectsView(container, onOpenInScratchpad = null) {
             window.removeEventListener('mouseup', onMouseUp);
             selectedNodeKey = node.key;
             activeLuaFileNodeKey = null;
+            gizmoUiState.waypointPopoverOpen = false;
             render();
           };
 
@@ -1923,12 +3031,30 @@ export function renderProjectsView(container, onOpenInScratchpad = null) {
       simulateBtn.addEventListener('click', () => {
         const proj = getActiveProject();
         normalizeProjectHierarchy(proj);
+        proj.nodes.forEach(n => {
+          if (n.key !== 'root' && n.depth !== 0) {
+            ensureNodeTransformDefaults(n);
+            ensureControlSpecificDefaults(n);
+          }
+        });
+        if (typeof window !== 'undefined') {
+          window.__miliastra_active_project = proj;
+        }
         const primaryScript = (proj.nodes.find(n => n.script)?.script.code) || '';
         openLuaRunnerModal(
           primaryScript,
           `${proj.title}`,
           () => primaryScript,
-          () => proj
+          () => {
+            normalizeProjectHierarchy(proj);
+            proj.nodes.forEach(n => {
+              if (n.key !== 'root' && n.depth !== 0) {
+                ensureNodeTransformDefaults(n);
+                ensureControlSpecificDefaults(n);
+              }
+            });
+            return proj;
+          }
         );
       });
     }

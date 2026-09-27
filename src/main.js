@@ -571,19 +571,26 @@ class MiliastraCodexApp {
   }
 
   renderAllEnumsView() {
+    const keyEventEnum = ENUM_DEFINITIONS.find(e => e.id === 'KeyEventType');
+    const kbKeyCodeEnum = ENUM_DEFINITIONS.find(e => e.id === 'KeyboardKeyCode');
+    const ctrlKeyCodeEnum = ENUM_DEFINITIONS.find(e => e.id === 'ControllerKeyCode');
+    const totalEnumItems = ENUM_DEFINITIONS.reduce((acc, e) => acc + e.items.length, 0);
+
     this.mainContent.innerHTML = `
       <div class="doc-hero">
         <div class="doc-hero-top">
-          <span class="doc-tag">ENUM MATRIX</span>
-          <span class="doc-source-file">library/enums/</span>
+          <span class="doc-tag">ENUM MATRIX & DYNAMIC KEYBINDS</span>
+          <span class="doc-source-file">library/enums/Enum.d.lua</span>
         </div>
-        <div class="doc-title">Enum & Keybind Reference</div>
-        <div class="doc-subtitle">Complete registry of input events, easing formulas, control types, and graphics modes.</div>
+        <div class="doc-title">Enum & Keybind Reference (${ENUM_DEFINITIONS.length} Tables • ${totalEnumItems} Total Items)</div>
+        <div class="doc-subtitle">
+          Complete registry of all <strong>${ENUM_DEFINITIONS.length} Enum tables</strong>, including <strong><code>Enum.KeyEventType</code> (${keyEventEnum ? keyEventEnum.items.length : 164} entries)</strong>, <strong><code>Enum.KeyboardKeyCode</code> (${kbKeyCodeEnum ? kbKeyCodeEnum.items.length : 59} entries)</strong>, and <strong><code>Enum.ControllerKeyCode</code> (${ctrlKeyCodeEnum ? ctrlKeyCodeEnum.items.length : 25} entries)</strong>.
+        </div>
       </div>
 
       <div class="section-header">
-        <span>Registered Enums</span>
-        <span class="sub-count">${ENUM_DEFINITIONS.length} CATEGORIES</span>
+        <span>Registered Enums (library/enums/Enum.d.lua)</span>
+        <span class="sub-count">${ENUM_DEFINITIONS.length} ENUM TABLES • ${totalEnumItems} ENTRIES</span>
       </div>
 
       <div class="matrix-grid">

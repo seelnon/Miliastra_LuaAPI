@@ -4,6 +4,12 @@
 // ============================================================================
 
 import * as fengariWebModule from 'https://cdn.jsdelivr.net/npm/fengari-web/+esm';
+import {
+  getKeyboardKeyHintMeta,
+  getControllerKeyHintMeta,
+  getVfxPresetMeta,
+  getReferenceTemplateMeta
+} from './project-control-settings.js';
 
 // Resolve export object across Vite dev, esbuild, and production bundle environments
 const fengariWeb = (fengariWebModule && fengariWebModule.lua)
@@ -15,6 +21,12 @@ const fengariWeb = (fengariWebModule && fengariWebModule.lua)
       : fengariWebModule;
 
 const { lua, lauxlib, lualib, interop, to_luastring, to_jsstring } = fengariWeb;
+
+const LUA_STR_UPDATE_TWEENS = to_luastring('_UpdateAllTweens');
+const LUA_STR_ON_UPDATE = to_luastring('OnUpdate');
+const LUA_STR_UPDATE_MOUNTED = to_luastring('_UpdateMountedScripts');
+const LUA_STR_DISPATCH_CURSOR = to_luastring('_M_DispatchCursorEvent');
+const LUA_STR_DISPATCH_KEY = to_luastring('_M_DispatchKeyEvent');
 
 export function safeLuaToJsString(raw) {
   if (raw === null || raw === undefined) return '';
@@ -145,8 +157,11 @@ export class VirtualUIControl {
     this.text = '';
     this.fontSize = 16;
     this.fontColor = { r: 255, g: 255, b: 255, a: 255 };
+    this._fontColorCss = 'rgba(255, 255, 255, 1)';
     this.bgColor = { r: 0, g: 0, b: 0, a: 0 };
+    this._bgColorCss = 'rgba(0, 0, 0, 0)';
     this.imageColor = { r: 255, g: 255, b: 255, a: 0 };
+    this._imageColorCss = 'rgba(255, 255, 255, 0)';
     this.imageType = 4; // Stretch
     this.resourceId = 100001;
     this._explicitImageColor = false;
@@ -163,11 +178,28 @@ export class VirtualUIControl {
     // Interaction & Events
     this.interactable = true;
     this.raycastTarget = false;
+    this.hasCursorListeners = false;
     this.disableCursorEventPassthrough = false;
     this.disableKeyEventPassthrough = false;
     this.showCursor = true;
     this.cursorListeners = {};
     this.keyListeners = {};
+
+    // Reusable screen bounds struct to avoid per-frame GC allocations
+    this._bounds = {
+      left: 0,
+      bottom: 0,
+      width: 0,
+      height: 0,
+      right: 0,
+      top: 0,
+      centerX: 0,
+      centerY: 0,
+      pivotScreenX: 0,
+      pivotScreenY: 0,
+      worldScaleX: 1,
+      worldScaleY: 1
+    };
 
     if (parent && parent.children) {
       parent.children.push(this);
@@ -231,7 +263,11 @@ export class VirtualUIControl {
       this.resourceId = Number(resourceId) || resourceId || 100001;
     }
     if (this.imageColor.a === 0 && !this._explicitImageColor) {
-      this.imageColor = { r: 255, g: 255, b: 255, a: 255 };
+      this.imageColor.r = 255;
+      this.imageColor.g = 255;
+      this.imageColor.b = 255;
+      this.imageColor.a = 255;
+      this._imageColorCss = 'rgba(255, 255, 255, 1)';
     }
   }
 
@@ -239,55 +275,40 @@ export class VirtualUIControl {
     this._explicitImageColor = true;
     if (typeof r === 'object' || typeof r === 'function') {
       this.imageColor = normalizeColor(r, 255);
-    } else if (this.imageColor && typeof this.imageColor === 'object') {
+    } else {
       this.imageColor.r = Number(r) || 0;
       this.imageColor.g = Number(g) || 0;
       this.imageColor.b = Number(b) || 0;
       this.imageColor.a = a !== undefined ? Number(a) : 255;
-    } else {
-      this.imageColor = {
-        r: Number(r) || 0,
-        g: Number(g) || 0,
-        b: Number(b) || 0,
-        a: a !== undefined ? Number(a) : 255
-      };
     }
+    const ic = this.imageColor;
+    this._imageColorCss = `rgba(${ic.r}, ${ic.g}, ${ic.b}, ${ic.a / 255})`;
   }
 
   SetBgColor(r, g, b, a = 0) {
     if (typeof r === 'object' || typeof r === 'function') {
       this.bgColor = normalizeColor(r, 0);
-    } else if (this.bgColor && typeof this.bgColor === 'object') {
+    } else {
       this.bgColor.r = Number(r) || 0;
       this.bgColor.g = Number(g) || 0;
       this.bgColor.b = Number(b) || 0;
       this.bgColor.a = a !== undefined ? Number(a) : 0;
-    } else {
-      this.bgColor = {
-        r: Number(r) || 0,
-        g: Number(g) || 0,
-        b: Number(b) || 0,
-        a: a !== undefined ? Number(a) : 0
-      };
     }
+    const bc = this.bgColor;
+    this._bgColorCss = `rgba(${bc.r}, ${bc.g}, ${bc.b}, ${bc.a / 255})`;
   }
 
   SetFontColor(r, g, b, a = 255) {
     if (typeof r === 'object' || typeof r === 'function') {
       this.fontColor = normalizeColor(r, 255);
-    } else if (this.fontColor && typeof this.fontColor === 'object') {
+    } else {
       this.fontColor.r = Number(r) || 0;
       this.fontColor.g = Number(g) || 0;
       this.fontColor.b = Number(b) || 0;
       this.fontColor.a = a !== undefined ? Number(a) : 255;
-    } else {
-      this.fontColor = {
-        r: Number(r) || 0,
-        g: Number(g) || 0,
-        b: Number(b) || 0,
-        a: a !== undefined ? Number(a) : 255
-      };
     }
+    const fc = this.fontColor;
+    this._fontColorCss = `rgba(${fc.r}, ${fc.g}, ${fc.b}, ${fc.a / 255})`;
   }
 
   SetVisible(v) {
@@ -343,11 +364,13 @@ export class VirtualUIControl {
 
   RemoveAllCursorEventListeners() {
     this.cursorListeners = {};
+    this.hasCursorListeners = false;
   }
 
   RemoveCursorEventListeners(eventType) {
     const key = Number(eventType) || eventType;
     delete this.cursorListeners[key];
+    this.hasCursorListeners = Object.keys(this.cursorListeners).length > 0;
   }
 
   RemoveAllKeyEventListeners() {
@@ -365,6 +388,10 @@ export class VirtualUIControl {
       this.cursorListeners[key] = [];
     }
     this.cursorListeners[key].push(callbackId);
+    this.hasCursorListeners = true;
+    if (typeof window !== 'undefined' && window.__miliastra_sim) {
+      window.__miliastra_sim.hasAnyCursorListeners = true;
+    }
   }
 
   AddKeyEventListener(eventType, callbackId) {
@@ -443,10 +470,13 @@ export class VirtualUIControl {
     let pivotScreenX = 0;
     let pivotScreenY = 0;
 
+    const anchorCenterX = (this.anchorMinX + (this.anchorMaxX !== undefined ? this.anchorMaxX : this.anchorMinX)) * 0.5;
+    const anchorCenterY = (this.anchorMinY + (this.anchorMaxY !== undefined ? this.anchorMaxY : this.anchorMinY)) * 0.5;
+
     if (hasParent) {
       // Local coordinate relative to parent's pivot before scaling:
-      const anchorRelX = (this.anchorMinX - parentPivotX) * parentWidth;
-      const anchorRelY = (this.anchorMinY - parentPivotY) * parentHeight;
+      const anchorRelX = (anchorCenterX - parentPivotX) * parentWidth;
+      const anchorRelY = (anchorCenterY - parentPivotY) * parentHeight;
       const localX = anchorRelX + this.anchoredPositionX;
       const localY = anchorRelY + this.anchoredPositionY;
 
@@ -454,8 +484,8 @@ export class VirtualUIControl {
       pivotScreenX = parentPivotScreenX + localX * parentScaleX;
       pivotScreenY = parentPivotScreenY + localY * parentScaleY;
     } else {
-      pivotScreenX = this.anchorMinX * canvasWidth + this.anchoredPositionX;
-      pivotScreenY = this.anchorMinY * canvasHeight + this.anchoredPositionY;
+      pivotScreenX = anchorCenterX * canvasWidth + this.anchoredPositionX;
+      pivotScreenY = anchorCenterY * canvasHeight + this.anchoredPositionY;
     }
 
     const width = this.sizeDeltaX * Math.abs(worldScaleX);
@@ -464,20 +494,20 @@ export class VirtualUIControl {
     const left = pivotScreenX - this.pivotX * width;
     const bottom = pivotScreenY - this.pivotY * height;
 
-    return {
-      left,
-      bottom,
-      width,
-      height,
-      right: left + width,
-      top: bottom + height,
-      centerX: left + width * 0.5,
-      centerY: bottom + height * 0.5,
-      pivotScreenX,
-      pivotScreenY,
-      worldScaleX,
-      worldScaleY
-    };
+    const b = this._bounds;
+    b.left = left;
+    b.bottom = bottom;
+    b.width = width;
+    b.height = height;
+    b.right = left + width;
+    b.top = bottom + height;
+    b.centerX = left + width * 0.5;
+    b.centerY = bottom + height * 0.5;
+    b.pivotScreenX = pivotScreenX;
+    b.pivotScreenY = pivotScreenY;
+    b.worldScaleX = worldScaleX;
+    b.worldScaleY = worldScaleY;
+    return b;
   }
 }
 
@@ -524,6 +554,8 @@ export class MiliastraSimulator {
 
     this.L = null;
     this.hoveredControls = [];
+    this.hasAnyCursorListeners = false;
+    this.nextControlId = 100;
     this.isMouseDown = false;
     this.isDragging = false;
     this.lastClickTime = 0;
@@ -590,7 +622,11 @@ export class MiliastraSimulator {
       const pos = getCanvasPos(e);
       this.cursorX = pos.x;
       this.cursorY = pos.y;
-      
+
+      if (!this.hasAnyCursorListeners && this.hoveredControls.length === 0) {
+        return;
+      }
+
       const currentHits = this.hitTestControls(pos.x, pos.y);
 
       // Check exits
@@ -617,6 +653,7 @@ export class MiliastraSimulator {
       }
 
       this.hoveredControls = currentHits;
+      this.updateButtonStateMachines();
     };
 
     const handleMouseDown = (e) => {
@@ -625,6 +662,8 @@ export class MiliastraSimulator {
       this.isDragging = false;
 
       const hits = this.hitTestControls(pos.x, pos.y);
+      this.hoveredControls = hits;
+      this.updateButtonStateMachines();
       this.dispatchCursorEvent(2, pos.x, pos.y, hits); // CursorDown
 
       if (e.button === 0) {
@@ -653,6 +692,8 @@ export class MiliastraSimulator {
 
       this.isMouseDown = false;
       this.isDragging = false;
+      this.hoveredControls = hits;
+      this.updateButtonStateMachines();
     };
 
     const handleClick = (e) => {
@@ -765,22 +806,59 @@ export class MiliastraSimulator {
     };
   }
 
-  // Hit test for controls from top to bottom
-  hitTestControls(x, y, control = this.rootControl, parentBounds = null) {
-    if (!control.visible || !control.alive) return [];
-    const hits = [];
+  // Update ClientUIPresetButtonControl 1-tier child status nodes (Normal / Hover / Pressed / Disabled)
+  updateButtonStateMachines() {
+    for (const ctrl of this.controlsById.values()) {
+      if (ctrl.className !== 'ClientUIPresetButtonControl' || !ctrl._hasStateMachine) continue;
+
+      let stateMode = 'normal';
+      if (ctrl.interactable === false) {
+        stateMode = 'disabled';
+      } else if (this.isMouseDown && this.hoveredControls.includes(ctrl)) {
+        stateMode = 'pressed';
+      } else if (this.hoveredControls.includes(ctrl)) {
+        stateMode = 'hover';
+      }
+
+      let activeChild = ctrl.normalStatusCtrl;
+      if (stateMode === 'hover') {
+        activeChild = ctrl.hoverStatusCtrl || ctrl.normalStatusCtrl;
+      } else if (stateMode === 'pressed') {
+        activeChild = ctrl.pressedStatusCtrl || ctrl.hoverStatusCtrl || ctrl.normalStatusCtrl;
+      } else if (stateMode === 'disabled') {
+        activeChild = ctrl.disabledStatusCtrl || ctrl.normalStatusCtrl;
+      }
+
+      for (const statusChild of ctrl._statusChildList) {
+        const isTarget = statusChild === activeChild;
+        statusChild.active = isTarget;
+        statusChild.visible = isTarget;
+      }
+    }
+  }
+
+  // Hit test for controls from top to bottom (zero-allocation single accumulator pass)
+  hitTestControls(x, y, control = this.rootControl, parentBounds = null, hits = []) {
+    if (!control.visible || !control.alive || control.active === false) return hits;
     const bounds = control.getScreenBounds(this.width, this.height, parentBounds);
     const inside = x >= bounds.left && x <= bounds.right && y >= bounds.bottom && y <= bounds.top;
 
-    if (control.children) {
-      // Check children in reverse order (topmost first)
-      for (let i = control.children.length - 1; i >= 0; i--) {
-        const childHits = this.hitTestControls(x, y, control.children[i], bounds);
-        hits.push(...childHits);
+    const children = control.children;
+    if (children && children.length > 0) {
+      if (this.hasMountedScripts) {
+        // In Interface Layout Editor (layered ordering), index 0 is the topmost layer
+        for (let i = 0; i < children.length; i++) {
+          this.hitTestControls(x, y, children[i], bounds, hits);
+        }
+      } else {
+        // In procedural single-file scripts, last-created child is topmost
+        for (let i = children.length - 1; i >= 0; i--) {
+          this.hitTestControls(x, y, children[i], bounds, hits);
+        }
       }
     }
 
-    if (inside && (control.raycastTarget || Object.keys(control.cursorListeners).length > 0)) {
+    if (inside && (control.raycastTarget || control.hasCursorListeners)) {
       hits.push(control);
     }
     return hits;
@@ -789,7 +867,7 @@ export class MiliastraSimulator {
   dispatchLuaCursorCallback(callbackId, x, y) {
     if (!this.L) return;
     try {
-      lua.lua_getglobal(this.L, to_luastring('_M_DispatchCursorEvent'));
+      lua.lua_getglobal(this.L, LUA_STR_DISPATCH_CURSOR);
       lua.lua_pushinteger(this.L, callbackId);
       lua.lua_pushnumber(this.L, x);
       lua.lua_pushnumber(this.L, y);
@@ -807,7 +885,7 @@ export class MiliastraSimulator {
   dispatchLuaKeyCallback(callbackId) {
     if (!this.L) return false;
     try {
-      lua.lua_getglobal(this.L, to_luastring('_M_DispatchKeyEvent'));
+      lua.lua_getglobal(this.L, LUA_STR_DISPATCH_KEY);
       lua.lua_pushinteger(this.L, callbackId);
       const res = lua.lua_pcall(this.L, 1, 1, 0);
       if (res !== lua.LUA_OK) {
@@ -905,9 +983,166 @@ export class MiliastraSimulator {
     // Make simulator instance accessible to Lua bridges
     window.__miliastra_sim = this;
 
+    // Register direct C-API fast-path bridge functions to bypass fengari-interop proxy & UTF-8 string decoding
+    const pushCFunc = lua.lua_pushcfunction || lua.lua_pushjsfunction;
+    if (typeof pushCFunc === 'function') {
+      const regFast = (name, fn) => {
+        pushCFunc(this.L, fn);
+        lua.lua_setglobal(this.L, to_luastring(name));
+      };
+      regFast('_M_FastSetPos', (L) => {
+        const ctrl = this.controlsById.get(lua.lua_tointeger(L, 1));
+        if (ctrl) {
+          ctrl.anchoredPositionX = lua.lua_tonumber(L, 2) || 0;
+          ctrl.anchoredPositionY = lua.lua_tonumber(L, 3) || 0;
+        }
+        return 0;
+      });
+      regFast('_M_FastSetSize', (L) => {
+        const ctrl = this.controlsById.get(lua.lua_tointeger(L, 1));
+        if (ctrl) {
+          ctrl.sizeDeltaX = lua.lua_tonumber(L, 2) || 0;
+          ctrl.sizeDeltaY = lua.lua_tonumber(L, 3) || 0;
+        }
+        return 0;
+      });
+      regFast('_M_FastSetVis', (L) => {
+        const ctrl = this.controlsById.get(lua.lua_tointeger(L, 1));
+        if (ctrl) {
+          ctrl.visible = Boolean(lua.lua_toboolean(L, 2));
+        }
+        return 0;
+      });
+      regFast('_M_FastSetScale', (L) => {
+        const ctrl = this.controlsById.get(lua.lua_tointeger(L, 1));
+        if (ctrl) {
+          ctrl.localScaleX = lua.lua_tonumber(L, 2);
+          ctrl.localScaleY = lua.lua_tonumber(L, 3);
+          ctrl.localScaleZ = lua.lua_tonumber(L, 4);
+        }
+        return 0;
+      });
+      regFast('_M_FastSetRot', (L) => {
+        const ctrl = this.controlsById.get(lua.lua_tointeger(L, 1));
+        if (ctrl) {
+          ctrl.localRotationX = lua.lua_tonumber(L, 2) || 0;
+          ctrl.localRotationY = lua.lua_tonumber(L, 3) || 0;
+          ctrl.localRotationZ = lua.lua_tonumber(L, 4) || 0;
+        }
+        return 0;
+      });
+      regFast('_M_FastSetAnchorMin', (L) => {
+        const ctrl = this.controlsById.get(lua.lua_tointeger(L, 1));
+        if (ctrl) {
+          ctrl.anchorMinX = lua.lua_tonumber(L, 2) || 0;
+          ctrl.anchorMinY = lua.lua_tonumber(L, 3) || 0;
+        }
+        return 0;
+      });
+      regFast('_M_FastSetAnchorMax', (L) => {
+        const ctrl = this.controlsById.get(lua.lua_tointeger(L, 1));
+        if (ctrl) {
+          ctrl.anchorMaxX = lua.lua_tonumber(L, 2) || 0;
+          ctrl.anchorMaxY = lua.lua_tonumber(L, 3) || 0;
+        }
+        return 0;
+      });
+      regFast('_M_FastSetPivot', (L) => {
+        const ctrl = this.controlsById.get(lua.lua_tointeger(L, 1));
+        if (ctrl) {
+          ctrl.pivotX = lua.lua_tonumber(L, 2) || 0;
+          ctrl.pivotY = lua.lua_tonumber(L, 3) || 0;
+        }
+        return 0;
+      });
+      regFast('_M_FastSetImage', (L) => {
+        const ctrl = this.controlsById.get(lua.lua_tointeger(L, 1));
+        if (ctrl) {
+          ctrl.SetImage(lua.lua_tointeger(L, 2) || 1, lua.lua_tointeger(L, 3) || 100001);
+        }
+        return 0;
+      });
+      regFast('_M_FastSetImgCol', (L) => {
+        const ctrl = this.controlsById.get(lua.lua_tointeger(L, 1));
+        if (ctrl) {
+          ctrl.SetImageColor(
+            lua.lua_tonumber(L, 2) || 0,
+            lua.lua_tonumber(L, 3) || 0,
+            lua.lua_tonumber(L, 4) || 0,
+            lua.lua_tonumber(L, 5)
+          );
+        }
+        return 0;
+      });
+      regFast('_M_FastSetBgCol', (L) => {
+        const ctrl = this.controlsById.get(lua.lua_tointeger(L, 1));
+        if (ctrl) {
+          ctrl.SetBgColor(
+            lua.lua_tonumber(L, 2) || 0,
+            lua.lua_tonumber(L, 3) || 0,
+            lua.lua_tonumber(L, 4) || 0,
+            lua.lua_tonumber(L, 5)
+          );
+        }
+        return 0;
+      });
+      regFast('_M_FastSetFontCol', (L) => {
+        const ctrl = this.controlsById.get(lua.lua_tointeger(L, 1));
+        if (ctrl) {
+          ctrl.SetFontColor(
+            lua.lua_tonumber(L, 2) || 0,
+            lua.lua_tonumber(L, 3) || 0,
+            lua.lua_tonumber(L, 4) || 0,
+            lua.lua_tonumber(L, 5)
+          );
+        }
+        return 0;
+      });
+      regFast('_M_FastSetText', (L) => {
+        const ctrl = this.controlsById.get(lua.lua_tointeger(L, 1));
+        if (ctrl) {
+          ctrl.text = getLuaStackString(L, 2);
+        }
+        return 0;
+      });
+      regFast('_M_FastSetFontSize', (L) => {
+        const ctrl = this.controlsById.get(lua.lua_tointeger(L, 1));
+        if (ctrl) {
+          ctrl.fontSize = lua.lua_tonumber(L, 2) || 14;
+        }
+        return 0;
+      });
+      regFast('_M_FastGetCanvasSize', (L) => {
+        lua.lua_pushnumber(L, this.width);
+        lua.lua_pushnumber(L, this.height);
+        return 2;
+      });
+      regFast('_M_FastGetCursorPos', (L) => {
+        lua.lua_pushnumber(L, this.cursorX);
+        lua.lua_pushnumber(L, this.cursorY);
+        return 2;
+      });
+    }
+
     const bootstrapLua = `
       local js = require "js"
       local sim = js.global.__miliastra_sim
+      local _FastSetPos = _M_FastSetPos
+      local _FastSetSize = _M_FastSetSize
+      local _FastSetVis = _M_FastSetVis
+      local _FastSetScale = _M_FastSetScale
+      local _FastSetRot = _M_FastSetRot
+      local _FastSetAnchorMin = _M_FastSetAnchorMin
+      local _FastSetAnchorMax = _M_FastSetAnchorMax
+      local _FastSetPivot = _M_FastSetPivot
+      local _FastSetImage = _M_FastSetImage
+      local _FastSetImgCol = _M_FastSetImgCol
+      local _FastSetBgCol = _M_FastSetBgCol
+      local _FastSetFontCol = _M_FastSetFontCol
+      local _FastSetText = _M_FastSetText
+      local _FastSetFontSize = _M_FastSetFontSize
+      local _FastGetCanvasSize = _M_FastGetCanvasSize
+      local _FastGetCursorPos = _M_FastGetCursorPos
 
       -- Polyfill math.pow for Lua 5.3+ environments (Fengari)
       math.pow = math.pow or function(x, y) return x ^ y end
@@ -956,9 +1191,10 @@ export class MiliastraSimulator {
         return false
       end
 
-      -- 1. Miliastra Color Library
+      -- 1. Miliastra Color Library (Memoized for 60FPS Zero-Allocation Loops)
       Color = {}
       Color.__index = Color
+      local _ColorCache = {}
 
       local ColorValueMeta = {
         __tostring = function(self)
@@ -971,14 +1207,23 @@ export class MiliastraSimulator {
       }
 
       function Color.FromRGBA(r, g, b, a)
+        r = tonumber(r) or 255
+        g = tonumber(g) or 255
+        b = tonumber(b) or 255
+        a = a ~= nil and tonumber(a) or 255
+        local key = ((r * 256 + g) * 256 + b) * 256 + a
+        local cached = _ColorCache[key]
+        if cached then return cached end
         local val = {
-          r = tonumber(r) or 255,
-          g = tonumber(g) or 255,
-          b = tonumber(b) or 255,
-          a = a ~= nil and tonumber(a) or 255,
+          r = r,
+          g = g,
+          b = b,
+          a = a,
+          _key = key,
           __isColor = true
         }
         setmetatable(val, ColorValueMeta)
+        _ColorCache[key] = val
         return val
       end
 
@@ -1180,24 +1425,29 @@ export class MiliastraSimulator {
         },
         KeyboardKeyCode = {
           None = 0,
-          Space = 32,
-          KeyW = 87,
-          KeyA = 65,
-          KeyS = 83,
-          KeyD = 68,
-          KeyE = 69,
-          KeyF = 70,
-          KeyQ = 81,
-          KeyR = 82
+          ESC = 1,
+          Number1 = 2, Number2 = 3, Number3 = 4, Number4 = 5, Number5 = 6,
+          Number6 = 7, Number7 = 8, Number8 = 9, Number9 = 10, Number0 = 11,
+          Minus = 12, Equal = 13, BackSpace = 14, Tab = 15,
+          Q = 16, W = 17, E = 18, R = 19, T = 20, Y = 21, U = 22, I = 23, O = 24, P = 25,
+          LeftBracket = 26, RightBracket = 27, Enter = 28, LeftCtrl = 29,
+          A = 30, S = 31, D = 32, F = 33, G = 34, H = 35, J = 36, K = 37, L = 38,
+          Semicolon = 39, Quote = 40, Backquote = 41, LeftShift = 42, Backslash = 43,
+          Z = 44, X = 45, C = 46, V = 47, B = 48, N = 49, M = 50,
+          Comma = 51, Period = 52, Slash = 53, RightShift = 54, LeftAlt = 56, Space = 57,
+          RightAlt = 184, RightCtrl = 157,
+          KeyW = 17, KeyA = 30, KeyS = 31, KeyD = 32, KeyE = 18, KeyF = 33, KeyQ = 16, KeyR = 19
         },
         ControllerKeyCode = {
           None = 0,
-          ButtonSouth = 1,
-          ButtonEast = 2,
-          ButtonWest = 3,
-          ButtonNorth = 4,
-          LeftShoulder = 5,
-          RightShoulder = 6
+          DPadUp = 1, DPadDown = 2, DPadLeft = 3, DPadRight = 4,
+          ActionTop = 5, ActionBottom = 6, ActionLeft = 7, ActionRight = 8,
+          LeftStick = 9, RightStick = 10, LeftBumper = 11, RightBumper = 12,
+          SpecialLeft = 13, SpecialRight = 14,
+          LeftTrigger = 15, RightTrigger = 16,
+          LeftStickUp = 17, LeftStickDown = 18, LeftStickLeft = 19, LeftStickRight = 20,
+          RightStickUp = 21, RightStickDown = 22, RightStickLeft = 23, RightStickRight = 24,
+          ButtonSouth = 6, ButtonEast = 8, ButtonWest = 7, ButtonNorth = 5, LeftShoulder = 11, RightShoulder = 12
         },
         StageMode = {
           Beyond = 1,
@@ -1256,48 +1506,20 @@ export class MiliastraSimulator {
           KeyboardOpenShortcutWheelKeyUp = 28,
           KeyboardSwitchToWalkOrRunKeyDown = 29,
           KeyboardSwitchToWalkOrRunKeyUp = 30,
-          KeyboardCraftspersonKey1Down = 31,
-          KeyboardCraftspersonKey2Down = 32,
-          KeyboardCraftspersonKey3Down = 33,
-          KeyboardCraftspersonKey4Down = 34,
-          KeyboardCraftspersonKey5Down = 35,
-          KeyboardCraftspersonKey6Down = 36,
-          KeyboardCraftspersonKey7Down = 37,
-          KeyboardCraftspersonKey8Down = 38,
-          KeyboardCraftspersonKey9Down = 39,
-          KeyboardCraftspersonKey10Down = 40,
-          KeyboardCraftspersonKey11Down = 41,
-          KeyboardCraftspersonKey12Down = 42,
-          KeyboardCraftspersonKey13Down = 43,
-          KeyboardCraftspersonKey14Down = 44,
-          KeyboardCraftspersonKey15Down = 45,
-          KeyboardCraftspersonKey16Down = 46,
-          KeyboardCraftspersonKey17Down = 47,
-          KeyboardCraftspersonKey18Down = 48,
-          KeyboardCraftspersonKey19Down = 49,
-          KeyboardCraftspersonKey20Down = 50,
-          KeyboardCraftspersonKey21Down = 51,
-          KeyboardCraftspersonKey22Down = 52,
-          KeyboardCraftspersonKey23Down = 53,
-          KeyboardCraftspersonKey24Down = 54,
-          KeyboardCraftspersonKey25Down = 55,
-          KeyboardCraftspersonKey26Down = 56,
-          KeyboardCraftspersonKey27Down = 57,
-          KeyboardCraftspersonKey28Down = 58,
-          KeyboardCraftspersonKey29Down = 59,
-          KeyboardCraftspersonKey30Down = 60,
-          KeyboardCraftspersonKey31Down = 61,
-          KeyboardCraftspersonKey32Down = 62,
-          KeyboardCraftspersonKey33Down = 63,
-          KeyboardCraftspersonKey34Down = 64,
-          KeyboardCraftspersonKey35Down = 65,
-          KeyboardCraftspersonKey36Down = 36,
-          KeyboardCraftspersonKey37Down = 37,
-          KeyboardCraftspersonKey38Down = 38,
-          KeyboardCraftspersonKey39Down = 39,
-          KeyboardCraftspersonKey40Down = 40,
-          KeyboardCraftspersonKey41Down = 71,
-          KeyboardCraftspersonKey42Down = 72,
+          KeyboardCraftspersonKey1Down = 31, KeyboardCraftspersonKey2Down = 32, KeyboardCraftspersonKey3Down = 33,
+          KeyboardCraftspersonKey4Down = 34, KeyboardCraftspersonKey5Down = 35, KeyboardCraftspersonKey6Down = 36,
+          KeyboardCraftspersonKey7Down = 37, KeyboardCraftspersonKey8Down = 38, KeyboardCraftspersonKey9Down = 39,
+          KeyboardCraftspersonKey10Down = 40, KeyboardCraftspersonKey11Down = 41, KeyboardCraftspersonKey12Down = 42,
+          KeyboardCraftspersonKey13Down = 43, KeyboardCraftspersonKey14Down = 44, KeyboardCraftspersonKey15Down = 45,
+          KeyboardCraftspersonKey16Down = 46, KeyboardCraftspersonKey17Down = 47, KeyboardCraftspersonKey18Down = 48,
+          KeyboardCraftspersonKey19Down = 49, KeyboardCraftspersonKey20Down = 50, KeyboardCraftspersonKey21Down = 51,
+          KeyboardCraftspersonKey22Down = 52, KeyboardCraftspersonKey23Down = 53, KeyboardCraftspersonKey24Down = 54,
+          KeyboardCraftspersonKey25Down = 55, KeyboardCraftspersonKey26Down = 56, KeyboardCraftspersonKey27Down = 57,
+          KeyboardCraftspersonKey28Down = 58, KeyboardCraftspersonKey29Down = 59, KeyboardCraftspersonKey30Down = 60,
+          KeyboardCraftspersonKey31Down = 61, KeyboardCraftspersonKey32Down = 62, KeyboardCraftspersonKey33Down = 63,
+          KeyboardCraftspersonKey34Down = 64, KeyboardCraftspersonKey35Down = 65, KeyboardCraftspersonKey36Down = 66,
+          KeyboardCraftspersonKey37Down = 67, KeyboardCraftspersonKey38Down = 68, KeyboardCraftspersonKey39Down = 69,
+          KeyboardCraftspersonKey40Down = 70, KeyboardCraftspersonKey41Down = 71, KeyboardCraftspersonKey42Down = 72,
           KeyboardCraftspersonKey43Down = 73,
           ControllerJumpKeyDown = 80,
           ControllerJumpKeyUp = 81,
@@ -1312,7 +1534,88 @@ export class MiliastraSimulator {
           ControllerCharacterSkill2KeyDown = 90,
           ControllerCharacterSkill2KeyUp = 91,
           ControllerCharacterSkill3KeyDown = 92,
-          ControllerCharacterSkill4KeyDown = 93
+          ControllerCharacterSkill4KeyDown = 93,
+          KeyboardNumber1KeyDown = 1002, KeyboardNumber1KeyUp = 2002,
+          KeyboardNumber2KeyDown = 1003, KeyboardNumber2KeyUp = 2003,
+          KeyboardNumber3KeyDown = 1004, KeyboardNumber3KeyUp = 2004,
+          KeyboardNumber4KeyDown = 1005, KeyboardNumber4KeyUp = 2005,
+          KeyboardNumber5KeyDown = 1006, KeyboardNumber5KeyUp = 2006,
+          KeyboardNumber6KeyDown = 1007, KeyboardNumber6KeyUp = 2007,
+          KeyboardNumber7KeyDown = 1008, KeyboardNumber7KeyUp = 2008,
+          KeyboardNumber8KeyDown = 1009, KeyboardNumber8KeyUp = 2009,
+          KeyboardNumber9KeyDown = 1010, KeyboardNumber9KeyUp = 2010,
+          KeyboardNumber0KeyDown = 1011, KeyboardNumber0KeyUp = 2011,
+          KeyboardMinusKeyDown = 1012, KeyboardMinusKeyUp = 2012,
+          KeyboardEqualKeyDown = 1013, KeyboardEqualKeyUp = 2013,
+          KeyboardBackSpaceKeyDown = 1014, KeyboardBackSpaceKeyUp = 2014,
+          KeyboardTabKeyDown = 1015, KeyboardTabKeyUp = 2015,
+          KeyboardQKeyDown = 1016, KeyboardQKeyUp = 2016,
+          KeyboardWKeyDown = 1017, KeyboardWKeyUp = 2017,
+          KeyboardEKeyDown = 1018, KeyboardEKeyUp = 2018,
+          KeyboardRKeyDown = 1019, KeyboardRKeyUp = 2019,
+          KeyboardTKeyDown = 1020, KeyboardTKeyUp = 2020,
+          KeyboardYKeyDown = 1021, KeyboardYKeyUp = 2021,
+          KeyboardUKeyDown = 1022, KeyboardUKeyUp = 2022,
+          KeyboardIKeyDown = 1023, KeyboardIKeyUp = 2023,
+          KeyboardOKeyDown = 1024, KeyboardOKeyUp = 2024,
+          KeyboardPKeyDown = 1025, KeyboardPKeyUp = 2025,
+          KeyboardLeftBracketKeyDown = 1026, KeyboardLeftBracketKeyUp = 2026,
+          KeyboardRightBracketKeyDown = 1027, KeyboardRightBracketKeyUp = 2027,
+          KeyboardEnterKeyDown = 1028, KeyboardEnterKeyUp = 2028,
+          KeyboardLeftCtrlKeyDown = 1029, KeyboardLeftCtrlKeyUp = 2029,
+          KeyboardAKeyDown = 1030, KeyboardAKeyUp = 2030,
+          KeyboardSKeyDown = 1031, KeyboardSKeyUp = 2031,
+          KeyboardDKeyDown = 1032, KeyboardDKeyUp = 2032,
+          KeyboardFKeyDown = 1033, KeyboardFKeyUp = 2033,
+          KeyboardGKeyDown = 1034, KeyboardGKeyUp = 2034,
+          KeyboardHKeyDown = 1035, KeyboardHKeyUp = 2035,
+          KeyboardJKeyDown = 1036, KeyboardJKeyUp = 2036,
+          KeyboardKKeyDown = 1037, KeyboardKKeyUp = 2037,
+          KeyboardLKeyDown = 1038, KeyboardLKeyUp = 2038,
+          KeyboardSemicolonKeyDown = 1039, KeyboardSemicolonKeyUp = 2039,
+          KeyboardQuoteKeyDown = 1040, KeyboardQuoteKeyUp = 2040,
+          KeyboardBackquoteKeyDown = 1041, KeyboardBackquoteKeyUp = 2041,
+          KeyboardLeftShiftKeyDown = 1042, KeyboardLeftShiftKeyUp = 2042,
+          KeyboardBackslashKeyDown = 1043, KeyboardBackslashKeyUp = 2043,
+          KeyboardZKeyDown = 1044, KeyboardZKeyUp = 2044,
+          KeyboardXKeyDown = 1045, KeyboardXKeyUp = 2045,
+          KeyboardCKeyDown = 1046, KeyboardCKeyUp = 2046,
+          KeyboardVKeyDown = 1047, KeyboardVKeyUp = 2047,
+          KeyboardBKeyDown = 1048, KeyboardBKeyUp = 2048,
+          KeyboardNKeyDown = 1049, KeyboardNKeyUp = 2049,
+          KeyboardMKeyDown = 1050, KeyboardMKeyUp = 2050,
+          KeyboardCommaKeyDown = 1051, KeyboardCommaKeyUp = 2051,
+          KeyboardPeriodKeyDown = 1052, KeyboardPeriodKeyUp = 2052,
+          KeyboardSlashKeyDown = 1053, KeyboardSlashKeyUp = 2053,
+          KeyboardRightShiftKeyDown = 1054, KeyboardRightShiftKeyUp = 2054,
+          KeyboardLeftAltKeyDown = 1056, KeyboardLeftAltKeyUp = 2056,
+          KeyboardSpaceKeyDown = 1057, KeyboardSpaceKeyUp = 2057,
+          KeyboardRightAltKeyDown = 1184, KeyboardRightAltKeyUp = 2184,
+          KeyboardRightCtrlKeyDown = 1157, KeyboardRightCtrlKeyUp = 2157,
+          ControllerDPadUpKeyDown = 3001, ControllerDPadUpKeyUp = 4001,
+          ControllerDPadDownKeyDown = 3002, ControllerDPadDownKeyUp = 4002,
+          ControllerDPadLeftKeyDown = 3003, ControllerDPadLeftKeyUp = 4003,
+          ControllerDPadRightKeyDown = 3004, ControllerDPadRightKeyUp = 4004,
+          ControllerActionTopKeyDown = 3005, ControllerActionTopKeyUp = 4005,
+          ControllerActionBottomKeyDown = 3006, ControllerActionBottomKeyUp = 4006,
+          ControllerActionLeftKeyDown = 3007, ControllerActionLeftKeyUp = 4007,
+          ControllerActionRightKeyDown = 3008, ControllerActionRightKeyUp = 4008,
+          ControllerLeftStickKeyDown = 3009, ControllerLeftStickKeyUp = 4009,
+          ControllerRightStickKeyDown = 3010, ControllerRightStickKeyUp = 4010,
+          ControllerLeftBumperKeyDown = 3011, ControllerLeftBumperKeyUp = 4011,
+          ControllerRightBumperKeyDown = 3012, ControllerRightBumperKeyUp = 4012,
+          ControllerSpecialLeftKeyDown = 3013, ControllerSpecialLeftKeyUp = 4013,
+          ControllerSpecialRightKeyDown = 3014, ControllerSpecialRightKeyUp = 4014,
+          ControllerLeftTriggerKeyDown = 3015, ControllerLeftTriggerKeyUp = 4015,
+          ControllerRightTriggerKeyDown = 3016, ControllerRightTriggerKeyUp = 4016,
+          ControllerLeftStickUpKeyDown = 3017, ControllerLeftStickUpKeyUp = 4017,
+          ControllerLeftStickDownKeyDown = 3018, ControllerLeftStickDownKeyUp = 4018,
+          ControllerLeftStickLeftKeyDown = 3019, ControllerLeftStickLeftKeyUp = 4019,
+          ControllerLeftStickRightKeyDown = 3020, ControllerLeftStickRightKeyUp = 4020,
+          ControllerRightStickUpKeyDown = 3021, ControllerRightStickUpKeyUp = 4021,
+          ControllerRightStickDownKeyDown = 3022, ControllerRightStickDownKeyUp = 4022,
+          ControllerRightStickLeftKeyDown = 3023, ControllerRightStickLeftKeyUp = 4023,
+          ControllerRightStickRightKeyDown = 3024, ControllerRightStickRightKeyUp = 4024
         },
         Device = {
           KeyboardAndMouse = 1,
@@ -1393,35 +1696,64 @@ export class MiliastraSimulator {
 
       local _ControlMethods = {
         SetAnchorMin = function(self, x, y)
-          local raw = self._raw
-          raw.anchorMinX = tonumber(x) or 0
-          raw.anchorMinY = tonumber(y) or 0
+          x = tonumber(x) or 0
+          y = tonumber(y) or 0
+          if self._ancMinX == x and self._ancMinY == y then return end
+          self._ancMinX = x
+          self._ancMinY = y
+          _FastSetAnchorMin(self._id, x, y)
         end,
         SetAnchorMax = function(self, x, y)
-          local raw = self._raw
-          raw.anchorMaxX = tonumber(x) or 0
-          raw.anchorMaxY = tonumber(y) or 0
+          x = tonumber(x) or 0
+          y = tonumber(y) or 0
+          if self._ancMaxX == x and self._ancMaxY == y then return end
+          self._ancMaxX = x
+          self._ancMaxY = y
+          _FastSetAnchorMax(self._id, x, y)
         end,
         SetPivot = function(self, x, y)
-          local raw = self._raw
-          raw.pivotX = tonumber(x) or 0
-          raw.pivotY = tonumber(y) or 0
+          x = tonumber(x) or 0
+          y = tonumber(y) or 0
+          if self._pivX == x and self._pivY == y then return end
+          self._pivX = x
+          self._pivY = y
+          _FastSetPivot(self._id, x, y)
         end,
         SetAnchoredPosition = function(self, x, y)
-          local raw = self._raw
-          raw.anchoredPositionX = tonumber(x) or 0
-          raw.anchoredPositionY = tonumber(y) or 0
+          x = tonumber(x) or 0
+          y = tonumber(y) or 0
+          if self._posX == x and self._posY == y then return end
+          self._posX = x
+          self._posY = y
+          _FastSetPos(self._id, x, y)
         end,
         SetSizeDelta = function(self, w, h)
-          local raw = self._raw
-          raw.sizeDeltaX = tonumber(w) or 0
-          raw.sizeDeltaY = tonumber(h) or 0
+          w = tonumber(w) or 0
+          h = tonumber(h) or 0
+          if self._sizeW == w and self._sizeH == h then return end
+          self._sizeW = w
+          self._sizeH = h
+          _FastSetSize(self._id, w, h)
         end,
         SetLocalScale = function(self, x, y, z)
-          self._raw:SetLocalScale(x, y, z)
+          x = x ~= nil and tonumber(x) or 1
+          y = y ~= nil and tonumber(y) or 1
+          z = z ~= nil and tonumber(z) or 1
+          if self._scaleX == x and self._scaleY == y and self._scaleZ == z then return end
+          self._scaleX = x
+          self._scaleY = y
+          self._scaleZ = z
+          _FastSetScale(self._id, x, y, z)
         end,
         SetLocalRotation = function(self, x, y, z)
-          self._raw:SetLocalRotation(x, y, z)
+          x = x ~= nil and tonumber(x) or 0
+          y = y ~= nil and tonumber(y) or 0
+          z = z ~= nil and tonumber(z) or 0
+          if self._rotX == x and self._rotY == y and self._rotZ == z then return end
+          self._rotX = x
+          self._rotY = y
+          self._rotZ = z
+          _FastSetRot(self._id, x, y, z)
         end,
         SetActive = function(self, active)
           local raw = self._raw
@@ -1429,7 +1761,7 @@ export class MiliastraSimulator {
           local nextActive = not not active
           raw:SetActive(nextActive)
           if wasActive ~= nextActive then
-            local scripts = _ControlScripts[tostring(raw.id)]
+            local scripts = _ControlScripts[tostring(self._id)]
             if scripts then
               for _, s in ipairs(scripts) do
                 if s.alive and s._env then
@@ -1447,10 +1779,18 @@ export class MiliastraSimulator {
           end
         end,
         SetImage = function(self, src, resId)
-          self._raw:SetImage(src, resId)
+          src = tonumber(src) or 1
+          resId = tonumber(resId) or 100001
+          if self._imgSrc == src and self._resId == resId then return end
+          self._imgSrc = src
+          self._resId = resId
+          _FastSetImage(self._id, src, resId)
         end,
         SetVisible = function(self, vis)
-          self._raw.visible = not not vis
+          local v = not not vis
+          if self._vis == v then return end
+          self._vis = v
+          _FastSetVis(self._id, v)
         end,
         SetInteractable = function(self, inter)
           self._raw.interactable = not not inter
@@ -1568,6 +1908,7 @@ export class MiliastraSimulator {
           local id = _M_NextCallbackId
           _M_NextCallbackId = _M_NextCallbackId + 1
           _M_CursorCallbacks[id] = luaCallback
+          sim.hasAnyCursorListeners = true
           self._raw:AddCursorEventListener(eventType, id)
         end,
         RemoveCursorEventListener = function(self, eventType, luaCallback)
@@ -1644,35 +1985,130 @@ export class MiliastraSimulator {
           self._raw.fillAmount = tonumber(fillAmount) or 1
         end,
         RefreshItems = function(self, itemCount, callback)
+          local raw = self._raw
           local count = math.max(0, math.floor(tonumber(itemCount) or 0))
-          self._raw.itemCount = count
-          if callback then
-            for idx = 0, count - 1 do
-              local itemCtrl = sim:createControl(self._raw.itemPrefabIndex or 1073741852, self._raw)
+          raw.itemCount = count
+
+          -- Destroy previously managed list items
+          if raw._gridItems then
+            for i = 1, #raw._gridItems do
+              local oldItem = raw._gridItems[i]
+              if oldItem and oldItem.Destroy then
+                oldItem:Destroy()
+              end
+            end
+          end
+          raw._gridItems = {}
+          raw._hasRefreshedItems = true
+
+          local boxW = math.max(40, tonumber(raw.sizeDeltaX) or 240)
+          local boxH = math.max(40, tonumber(raw.sizeDeltaY) or 120)
+          local itemW = math.max(12, tonumber(raw.itemWidth) or 56)
+          local itemH = math.max(12, tonumber(raw.itemHeight) or 36)
+          local spaceX = math.max(0, tonumber(raw.spacingX) or 6)
+          local spaceY = math.max(0, tonumber(raw.spacingY) or 6)
+          local padT = math.max(0, tonumber(raw.paddingTop) or 6)
+          local padL = math.max(0, tonumber(raw.paddingLeft) or 6)
+          local padR = math.max(0, tonumber(raw.paddingRight) or 6)
+          local padB = math.max(0, tonumber(raw.paddingBottom) or 6)
+          local isVert = (raw.scrollDirection == nil or raw.scrollDirection == 1)
+          local isFixed = (raw.layoutConstraint == 1)
+          local sbRes = (raw.showScrollBar ~= false) and 10 or 0
+
+          local crossCount = 1
+          if isFixed then
+            crossCount = math.max(1, math.floor(tonumber(raw.layoutConstraintFixedCount) or 3))
+          else
+            if isVert then
+              local availW = math.max(itemW, boxW - padL - padR - sbRes)
+              crossCount = math.max(1, math.floor((availW + spaceX) / (itemW + spaceX)))
+            else
+              local availH = math.max(itemH, boxH - padT - padB - sbRes)
+              crossCount = math.max(1, math.floor((availH + spaceY) / (itemH + spaceY)))
+            end
+          end
+
+          for idx = 0, count - 1 do
+            local itemCtrl = sim:createControl(raw.itemPrefabIndex or 1073741954, raw)
+            local col = isVert and (idx % crossCount) or math.floor(idx / crossCount)
+            local row = isVert and math.floor(idx / crossCount) or (idx % crossCount)
+            local cellLeft = padL + col * (itemW + spaceX)
+            local cellTop = padT + row * (itemH + spaceY)
+
+            -- Anchor each cell relative to top-left (0, 1) of the GridScroller
+            itemCtrl.anchorMinX = 0
+            itemCtrl.anchorMinY = 1
+            itemCtrl.anchorMaxX = 0
+            itemCtrl.anchorMaxY = 1
+            itemCtrl.pivotX = 0
+            itemCtrl.pivotY = 1
+            itemCtrl.anchoredPositionX = cellLeft
+            itemCtrl.anchoredPositionY = -cellTop
+            itemCtrl.sizeDeltaX = itemW
+            itemCtrl.sizeDeltaY = itemH
+            itemCtrl.raycastTarget = true
+            itemCtrl._gridItemIndex = idx
+            itemCtrl._gridOwner = raw
+            table.insert(raw._gridItems, itemCtrl)
+
+            if callback then
               callback(wrapControl(itemCtrl), idx)
             end
           end
         end,
         GetItemIndex = function(self, control)
-          return 0
+          if not control or not control._raw then return -1 end
+          local itemRaw = control._raw
+          if itemRaw._gridOwner == self._raw and itemRaw._gridItemIndex ~= nil then
+            return itemRaw._gridItemIndex
+          end
+          return -1
         end,
         GetItemSize = function(self)
-          return 100, 100
+          local raw = self._raw
+          return tonumber(raw.itemWidth) or 56, tonumber(raw.itemHeight) or 36
         end,
         GetItemSpacing = function(self)
-          return 8, 8
+          local raw = self._raw
+          return tonumber(raw.spacingX) or 6, tonumber(raw.spacingY) or 6
         end,
         GetPadding = function(self)
-          return 8, 8, 8, 8
+          local raw = self._raw
+          return tonumber(raw.paddingTop) or 6, tonumber(raw.paddingBottom) or 6, tonumber(raw.paddingLeft) or 6, tonumber(raw.paddingRight) or 6
         end,
         ScrollToItemAt = function(self, index, scrollAlignType)
+          local raw = self._raw
+          local count = math.max(1, tonumber(raw.itemCount) or 1)
+          local clamped = math.max(0, math.min(count - 1, math.floor(tonumber(index) or 0)))
+          raw.scrollProgress = count > 1 and (clamped / (count - 1)) or 0
         end,
         GetContentLength = function(self)
-          return (self._raw.itemCount or 0) * 108
+          local raw = self._raw
+          local count = math.max(0, tonumber(raw.itemCount) or 0)
+          if count == 0 then return 0 end
+          local isVert = (raw.scrollDirection == nil or raw.scrollDirection == 1)
+          local itemW = tonumber(raw.itemWidth) or 56
+          local itemH = tonumber(raw.itemHeight) or 36
+          local spaceX = tonumber(raw.spacingX) or 6
+          local spaceY = tonumber(raw.spacingY) or 6
+          local padT = tonumber(raw.paddingTop) or 6
+          local padB = tonumber(raw.paddingBottom) or 6
+          local padL = tonumber(raw.paddingLeft) or 6
+          local padR = tonumber(raw.paddingRight) or 6
+          if isVert then
+            local baseLen = padT + padB - spaceY
+            return baseLen + (itemH + spaceY) * count
+          else
+            local baseLen = padL + padR - spaceX
+            return baseLen + (itemW + spaceX) * count
+          end
         end,
         PlayAnimation = function(self)
+          self._raw._animPlaying = true
+          self._raw._animRestartCount = (self._raw._animRestartCount or 0) + 1
         end,
         StopAnimation = function(self)
+          self._raw._animPlaying = false
         end,
         GetChildren = function(self)
           local jsChildren = self._raw:GetChildren()
@@ -1780,8 +2216,9 @@ export class MiliastraSimulator {
       }
 
       local _ControlSetters = {
-        name = function(jsCtrl, v) jsCtrl.name = v end,
-        parent = function(jsCtrl, v)
+        name = function(t, v) t._raw.name = v end,
+        parent = function(t, v)
+          local jsCtrl = t._raw
           local newParent = v and v._raw or nil
           if jsCtrl.parent and jsCtrl.parent.children then
             local idx = jsCtrl.parent.children:indexOf(jsCtrl)
@@ -1792,90 +2229,220 @@ export class MiliastraSimulator {
             newParent.children:push(jsCtrl)
           end
         end,
-        text = function(jsCtrl, v) jsCtrl.text = tostring(v) end,
-        fontSize = function(jsCtrl, v) jsCtrl.fontSize = tonumber(v) or 14 end,
-        fontColor = function(jsCtrl, v)
+        text = function(t, v)
+          local s = tostring(v)
+          if t._text == s then return end
+          t._text = s
+          _FastSetText(t._id, s)
+        end,
+        fontSize = function(t, v)
+          local sz = tonumber(v) or 14
+          if t._fontSize == sz then return end
+          t._fontSize = sz
+          _FastSetFontSize(t._id, sz)
+        end,
+        fontColor = function(t, v)
           if type(v) == "table" then
-            jsCtrl:SetFontColor(tonumber(v.r) or 255, tonumber(v.g) or 255, tonumber(v.b) or 255, v.a ~= nil and tonumber(v.a) or 255)
+            local key = v._key
+            if key and t._fontColKey == key then return end
+            t._fontColKey = key
+            _FastSetFontCol(t._id, tonumber(v.r) or 255, tonumber(v.g) or 255, tonumber(v.b) or 255, v.a ~= nil and tonumber(v.a) or 255)
           else
-            jsCtrl.fontColor = v
+            t._fontColKey = nil
+            t._raw.fontColor = v
           end
         end,
-        bgColor = function(jsCtrl, v)
+        bgColor = function(t, v)
           if type(v) == "table" then
-            jsCtrl:SetBgColor(tonumber(v.r) or 0, tonumber(v.g) or 0, tonumber(v.b) or 0, v.a ~= nil and tonumber(v.a) or 0)
+            local key = v._key
+            if key and t._bgColKey == key then return end
+            t._bgColKey = key
+            _FastSetBgCol(t._id, tonumber(v.r) or 0, tonumber(v.g) or 0, tonumber(v.b) or 0, v.a ~= nil and tonumber(v.a) or 0)
           else
-            jsCtrl.bgColor = v
+            t._bgColKey = nil
+            t._raw.bgColor = v
           end
         end,
-        imageColor = function(jsCtrl, v)
+        imageColor = function(t, v)
           if type(v) == "table" then
-            jsCtrl:SetImageColor(tonumber(v.r) or 255, tonumber(v.g) or 255, tonumber(v.b) or 255, v.a ~= nil and tonumber(v.a) or 255)
+            local key = v._key
+            if key and t._imgColKey == key then return end
+            t._imgColKey = key
+            _FastSetImgCol(t._id, tonumber(v.r) or 255, tonumber(v.g) or 255, tonumber(v.b) or 255, v.a ~= nil and tonumber(v.a) or 255)
           else
-            jsCtrl.imageColor = v
+            t._imgColKey = nil
+            t._raw.imageColor = v
           end
         end,
-        outlineColor = function(jsCtrl, v)
+        outlineColor = function(t, v)
           if type(v) == "table" then
-            jsCtrl.outlineColor = { r = tonumber(v.r) or 0, g = tonumber(v.g) or 0, b = tonumber(v.b) or 0, a = v.a ~= nil and tonumber(v.a) or 255 }
+            t._raw.outlineColor = { r = tonumber(v.r) or 0, g = tonumber(v.g) or 0, b = tonumber(v.b) or 0, a = v.a ~= nil and tonumber(v.a) or 255 }
           end
         end,
-        enableOutline = function(jsCtrl, v) jsCtrl.enableOutline = not not v end,
-        minimumFontSize = function(jsCtrl, v) jsCtrl.minimumFontSize = tonumber(v) or 10 end,
-        imageType = function(jsCtrl, v) jsCtrl.imageType = tonumber(v) or 4 end,
-        resourceId = function(jsCtrl, v) jsCtrl.resourceId = tonumber(v) or v or 100001 end,
-        anchoredPositionX = function(jsCtrl, v) jsCtrl.anchoredPositionX = tonumber(v) or 0 end,
-        anchoredPositionY = function(jsCtrl, v) jsCtrl.anchoredPositionY = tonumber(v) or 0 end,
-        sizeDeltaX = function(jsCtrl, v) jsCtrl.sizeDeltaX = tonumber(v) or 0 end,
-        sizeDeltaY = function(jsCtrl, v) jsCtrl.sizeDeltaY = tonumber(v) or 0 end,
-        localScaleX = function(jsCtrl, v) jsCtrl.localScaleX = tonumber(v) ~= nil and tonumber(v) or 1 end,
-        localScaleY = function(jsCtrl, v) jsCtrl.localScaleY = tonumber(v) ~= nil and tonumber(v) or 1 end,
-        localScaleZ = function(jsCtrl, v) jsCtrl.localScaleZ = tonumber(v) ~= nil and tonumber(v) or 1 end,
-        localRotationX = function(jsCtrl, v) jsCtrl.localRotationX = tonumber(v) ~= nil and tonumber(v) or 0 end,
-        localRotationY = function(jsCtrl, v) jsCtrl.localRotationY = tonumber(v) ~= nil and tonumber(v) or 0 end,
-        localRotationZ = function(jsCtrl, v) jsCtrl.localRotationZ = tonumber(v) ~= nil and tonumber(v) or 0 end,
-        anchorMinX = function(jsCtrl, v) jsCtrl.anchorMinX = tonumber(v) or 0 end,
-        anchorMinY = function(jsCtrl, v) jsCtrl.anchorMinY = tonumber(v) or 0 end,
-        anchorMaxX = function(jsCtrl, v) jsCtrl.anchorMaxX = tonumber(v) or 0 end,
-        anchorMaxY = function(jsCtrl, v) jsCtrl.anchorMaxY = tonumber(v) or 0 end,
-        pivotX = function(jsCtrl, v) jsCtrl.pivotX = tonumber(v) or 0.5 end,
-        pivotY = function(jsCtrl, v) jsCtrl.pivotY = tonumber(v) or 0.5 end,
-        visible = function(jsCtrl, v) jsCtrl.visible = not not v end,
-        alive = function(jsCtrl, v) jsCtrl.alive = not not v end,
-        active = function(jsCtrl, v) jsCtrl.active = not not v end,
-        interactable = function(jsCtrl, v) jsCtrl.interactable = not not v end,
-        raycastTarget = function(jsCtrl, v) jsCtrl.raycastTarget = not not v end,
-        adaptiveFontSize = function(jsCtrl, v) jsCtrl.adaptiveFontSize = not not v end,
-        horizontalAlignment = function(jsCtrl, v) jsCtrl.horizontalAlignment = tonumber(v) or 1 end,
-        verticalAlignment = function(jsCtrl, v) jsCtrl.verticalAlignment = tonumber(v) or 1 end,
-        canControllerFocus = function(jsCtrl, v) jsCtrl.canControllerFocus = not not v end,
-        isolateNavigation = function(jsCtrl, v) jsCtrl.isolateNavigation = not not v end,
-        disableCursorEventPassthrough = function(jsCtrl, v) jsCtrl.disableCursorEventPassthrough = not not v end,
-        disableKeyEventPassthrough = function(jsCtrl, v) jsCtrl.disableKeyEventPassthrough = not not v end,
-        showCursor = function(jsCtrl, v) jsCtrl.showCursor = not not v end,
-        enableMask = function(jsCtrl, v) jsCtrl.enableMask = not not v end,
-        enableSoftEdge = function(jsCtrl, v) jsCtrl.enableSoftEdge = not not v end,
-        softEdgeWidthX = function(jsCtrl, v) jsCtrl.softEdgeWidthX = tonumber(v) or 0 end,
-        softEdgeWidthY = function(jsCtrl, v) jsCtrl.softEdgeWidthY = tonumber(v) or 0 end,
-        horizontalSoftRange = function(jsCtrl, v) jsCtrl.horizontalSoftRange = tonumber(v) or 0 end,
-        verticalSoftRange = function(jsCtrl, v) jsCtrl.verticalSoftRange = tonumber(v) or 0 end,
-        softEdgeMode = function(jsCtrl, v) jsCtrl.softEdgeMode = tonumber(v) or 1 end,
-        reverseMaskArea = function(jsCtrl, v) jsCtrl.reverseMaskArea = not not v end,
-        fillType = function(jsCtrl, v) jsCtrl.fillType = tonumber(v) or 0 end,
-        fillHorizontalType = function(jsCtrl, v) jsCtrl.fillHorizontalType = tonumber(v) or 0 end,
-        fillVerticalType = function(jsCtrl, v) jsCtrl.fillVerticalType = tonumber(v) or 0 end,
-        fillRadial90Type = function(jsCtrl, v) jsCtrl.fillRadial90Type = tonumber(v) or 0 end,
-        fillRadialType = function(jsCtrl, v) jsCtrl.fillRadialType = tonumber(v) or 0 end,
-        fillAmount = function(jsCtrl, v) jsCtrl.fillAmount = tonumber(v) or 1 end,
-        showScrollBar = function(jsCtrl, v) jsCtrl.showScrollBar = not not v end,
-        clickAudioId = function(jsCtrl, v) jsCtrl.clickAudioId = tonumber(v) or 0 end,
-        itemPrefabIndex = function(jsCtrl, v) jsCtrl.itemPrefabIndex = tonumber(v) or 1073741852 end,
-        scrollProgress = function(jsCtrl, v) jsCtrl.scrollProgress = tonumber(v) or 0 end,
-        animationId = function(jsCtrl, v) jsCtrl.animationId = tonumber(v) or 0 end,
-        playSoundEffect = function(jsCtrl, v) jsCtrl.playSoundEffect = not not v end,
-        layer = function(jsCtrl, v) jsCtrl.layer = tonumber(v) or 0 end,
-        keyboardKeyCode = function(jsCtrl, v) jsCtrl.keyboardKeyCode = tonumber(v) or 0 end,
-        controllerKeyCode = function(jsCtrl, v) jsCtrl.controllerKeyCode = tonumber(v) or 0 end
+        enableOutline = function(t, v) t._raw.enableOutline = not not v end,
+        minimumFontSize = function(t, v) t._raw.minimumFontSize = tonumber(v) or 10 end,
+        imageType = function(t, v)
+          local it = tonumber(v) or 4
+          if t._imageType == it then return end
+          t._imageType = it
+          t._raw.imageType = it
+        end,
+        resourceId = function(t, v)
+          local rid = tonumber(v) or v or 100001
+          if t._resId == rid then return end
+          t._resId = rid
+          t._raw.resourceId = rid
+        end,
+        anchoredPositionX = function(t, v)
+          local x = tonumber(v) or 0
+          if t._posX == x then return end
+          t._posX = x
+          local y = t._posY
+          if y == nil then
+            y = t._raw.anchoredPositionY or 0
+            t._posY = y
+          end
+          _FastSetPos(t._id, x, y)
+        end,
+        anchoredPositionY = function(t, v)
+          local y = tonumber(v) or 0
+          if t._posY == y then return end
+          t._posY = y
+          local x = t._posX
+          if x == nil then
+            x = t._raw.anchoredPositionX or 0
+            t._posX = x
+          end
+          _FastSetPos(t._id, x, y)
+        end,
+        sizeDeltaX = function(t, v)
+          local w = tonumber(v) or 0
+          if t._sizeW == w then return end
+          t._sizeW = w
+          local h = t._sizeH
+          if h == nil then
+            h = t._raw.sizeDeltaY or 0
+            t._sizeH = h
+          end
+          _FastSetSize(t._id, w, h)
+        end,
+        sizeDeltaY = function(t, v)
+          local h = tonumber(v) or 0
+          if t._sizeH == h then return end
+          t._sizeH = h
+          local w = t._sizeW
+          if w == nil then
+            w = t._raw.sizeDeltaX or 0
+            t._sizeW = w
+          end
+          _FastSetSize(t._id, w, h)
+        end,
+        localScaleX = function(t, v)
+          local x = tonumber(v) ~= nil and tonumber(v) or 1
+          if t._scaleX == x then return end
+          t._scaleX = x
+          local y = t._scaleY ~= nil and t._scaleY or (t._raw.localScaleY or 1)
+          local z = t._scaleZ ~= nil and t._scaleZ or (t._raw.localScaleZ or 1)
+          t._scaleY = y
+          t._scaleZ = z
+          _FastSetScale(t._id, x, y, z)
+        end,
+        localScaleY = function(t, v)
+          local y = tonumber(v) ~= nil and tonumber(v) or 1
+          if t._scaleY == y then return end
+          t._scaleY = y
+          local x = t._scaleX ~= nil and t._scaleX or (t._raw.localScaleX or 1)
+          local z = t._scaleZ ~= nil and t._scaleZ or (t._raw.localScaleZ or 1)
+          t._scaleX = x
+          t._scaleZ = z
+          _FastSetScale(t._id, x, y, z)
+        end,
+        localScaleZ = function(t, v)
+          local z = tonumber(v) ~= nil and tonumber(v) or 1
+          if t._scaleZ == z then return end
+          t._scaleZ = z
+          local x = t._scaleX ~= nil and t._scaleX or (t._raw.localScaleX or 1)
+          local y = t._scaleY ~= nil and t._scaleY or (t._raw.localScaleY or 1)
+          t._scaleX = x
+          t._scaleY = y
+          _FastSetScale(t._id, x, y, z)
+        end,
+        localRotationX = function(t, v)
+          local x = tonumber(v) ~= nil and tonumber(v) or 0
+          if t._rotX == x then return end
+          t._rotX = x
+          local y = t._rotY ~= nil and t._rotY or (t._raw.localRotationY or 0)
+          local z = t._rotZ ~= nil and t._rotZ or (t._raw.localRotationZ or 0)
+          _FastSetRot(t._id, x, y, z)
+        end,
+        localRotationY = function(t, v)
+          local y = tonumber(v) ~= nil and tonumber(v) or 0
+          if t._rotY == y then return end
+          t._rotY = y
+          local x = t._rotX ~= nil and t._rotX or (t._raw.localRotationX or 0)
+          local z = t._rotZ ~= nil and t._rotZ or (t._raw.localRotationZ or 0)
+          _FastSetRot(t._id, x, y, z)
+        end,
+        localRotationZ = function(t, v)
+          local z = tonumber(v) ~= nil and tonumber(v) or 0
+          if t._rotZ == z then return end
+          t._rotZ = z
+          local x = t._rotX ~= nil and t._rotX or (t._raw.localRotationX or 0)
+          local y = t._rotY ~= nil and t._rotY or (t._raw.localRotationY or 0)
+          _FastSetRot(t._id, x, y, z)
+        end,
+        anchorMinX = function(t, v) t._raw.anchorMinX = tonumber(v) or 0 end,
+        anchorMinY = function(t, v) t._raw.anchorMinY = tonumber(v) or 0 end,
+        anchorMaxX = function(t, v) t._raw.anchorMaxX = tonumber(v) or 0 end,
+        anchorMaxY = function(t, v) t._raw.anchorMaxY = tonumber(v) or 0 end,
+        pivotX = function(t, v) t._raw.pivotX = tonumber(v) or 0.5 end,
+        pivotY = function(t, v) t._raw.pivotY = tonumber(v) or 0.5 end,
+        visible = function(t, v)
+          local vis = not not v
+          if t._vis == vis then return end
+          t._vis = vis
+          _FastSetVis(t._id, vis)
+        end,
+        alive = function(t, v) t._raw.alive = not not v end,
+        active = function(t, v) t._raw.active = not not v end,
+        interactable = function(t, v) t._raw.interactable = not not v end,
+        raycastTarget = function(t, v) t._raw.raycastTarget = not not v end,
+        adaptiveFontSize = function(t, v) t._raw.adaptiveFontSize = not not v end,
+        horizontalAlignment = function(t, v) t._raw.horizontalAlignment = tonumber(v) or 1 end,
+        verticalAlignment = function(t, v) t._raw.verticalAlignment = tonumber(v) or 1 end,
+        canControllerFocus = function(t, v) t._raw.canControllerFocus = not not v end,
+        isolateNavigation = function(t, v) t._raw.isolateNavigation = not not v end,
+        disableCursorEventPassthrough = function(t, v) t._raw.disableCursorEventPassthrough = not not v end,
+        disableKeyEventPassthrough = function(t, v) t._raw.disableKeyEventPassthrough = not not v end,
+        showCursor = function(t, v) t._raw.showCursor = not not v end,
+        enableMask = function(t, v) t._raw.enableMask = not not v end,
+        enableSoftEdge = function(t, v) t._raw.enableSoftEdge = not not v end,
+        softEdgeWidthX = function(t, v) t._raw.softEdgeWidthX = tonumber(v) or 0 end,
+        softEdgeWidthY = function(t, v) t._raw.softEdgeWidthY = tonumber(v) or 0 end,
+        horizontalSoftRange = function(t, v) t._raw.horizontalSoftRange = tonumber(v) or 0 end,
+        verticalSoftRange = function(t, v) t._raw.verticalSoftRange = tonumber(v) or 0 end,
+        softEdgeMode = function(t, v) t._raw.softEdgeMode = tonumber(v) or 1 end,
+        reverseMaskArea = function(t, v) t._raw.reverseMaskArea = not not v end,
+        fillType = function(t, v) t._raw.fillType = tonumber(v) or 0 end,
+        fillHorizontalType = function(t, v) t._raw.fillHorizontalType = tonumber(v) or 0 end,
+        fillVerticalType = function(t, v) t._raw.fillVerticalType = tonumber(v) or 0 end,
+        fillRadial90Type = function(t, v) t._raw.fillRadial90Type = tonumber(v) or 0 end,
+        fillRadialType = function(t, v) t._raw.fillRadialType = tonumber(v) or 0 end,
+        fillAmount = function(t, v) t._raw.fillAmount = tonumber(v) or 1 end,
+        showScrollBar = function(t, v) t._raw.showScrollBar = not not v end,
+        clickAudioId = function(t, v) t._raw.clickAudioId = tonumber(v) or 0 end,
+        itemPrefabIndex = function(t, v) t._raw.itemPrefabIndex = tonumber(v) or 1073741852 end,
+        scrollProgress = function(t, v) t._raw.scrollProgress = tonumber(v) or 0 end,
+        animationId = function(t, v)
+          local nextId = tonumber(v) or 0
+          t._raw.animationId = nextId
+          t._raw._animPlaying = nextId > 0
+          t._raw._animRestartCount = (t._raw._animRestartCount or 0) + 1
+        end,
+        playSoundEffect = function(t, v) t._raw.playSoundEffect = not not v end,
+        layer = function(t, v) t._raw.layer = tonumber(v) or 0 end,
+        keyboardKeyCode = function(t, v) t._raw.keyboardKeyCode = tonumber(v) or 0 end,
+        controllerKeyCode = function(t, v) t._raw.controllerKeyCode = tonumber(v) or 0 end
       }
 
       local _ControlMeta = {
@@ -1889,7 +2456,7 @@ export class MiliastraSimulator {
         __newindex = function(t, k, v)
           local s = _ControlSetters[k]
           if s then
-            s(t._raw, v)
+            s(t, v)
           else
             rawset(t, k, v)
           end
@@ -1908,7 +2475,22 @@ export class MiliastraSimulator {
         local cached = _ControlWrapCache[jsCtrl]
         if cached then return cached end
 
-        local obj = { _raw = jsCtrl }
+        local obj = {
+          _raw = jsCtrl,
+          _id = jsCtrl.id,
+          SetAnchorMin = _ControlMethods.SetAnchorMin,
+          SetAnchorMax = _ControlMethods.SetAnchorMax,
+          SetPivot = _ControlMethods.SetPivot,
+          SetAnchoredPosition = _ControlMethods.SetAnchoredPosition,
+          SetSizeDelta = _ControlMethods.SetSizeDelta,
+          SetLocalScale = _ControlMethods.SetLocalScale,
+          SetLocalRotation = _ControlMethods.SetLocalRotation,
+          SetImage = _ControlMethods.SetImage,
+          SetVisible = _ControlMethods.SetVisible,
+          SetSoftEdgeWidth = _ControlMethods.SetSoftEdgeWidth,
+          SetAsLastSibling = _ControlMethods.SetAsLastSibling,
+          SetAsFirstSibling = _ControlMethods.SetAsFirstSibling
+        }
         setmetatable(obj, _ControlMeta)
         _ControlWrapCache[jsCtrl] = obj
         return obj
@@ -2406,25 +2988,29 @@ export class MiliastraSimulator {
       end
 
       function _UpdateAllTweens(dt)
-        local tweenList = {}
-        for _, tw in pairs(_ActiveTweens) do
-          table.insert(tweenList, tw)
-        end
-        for i = 1, #tweenList do
-          local tw = tweenList[i]
-          if tw and tw.Update and not tw.isKilled then
-            tw:Update(dt)
+        if next(_ActiveTweens) ~= nil then
+          local tweenList = {}
+          for _, tw in pairs(_ActiveTweens) do
+            table.insert(tweenList, tw)
+          end
+          for i = 1, #tweenList do
+            local tw = tweenList[i]
+            if tw and tw.Update and not tw.isKilled then
+              tw:Update(dt)
+            end
           end
         end
 
-        local seqList = {}
-        for _, seq in pairs(_ActiveSequences) do
-          table.insert(seqList, seq)
-        end
-        for i = 1, #seqList do
-          local seq = seqList[i]
-          if seq and seq.Update and not seq.isKilled then
-            seq:Update(dt)
+        if next(_ActiveSequences) ~= nil then
+          local seqList = {}
+          for _, seq in pairs(_ActiveSequences) do
+            table.insert(seqList, seq)
+          end
+          for i = 1, #seqList do
+            local seq = seqList[i]
+            if seq and seq.Update and not seq.isKilled then
+              seq:Update(dt)
+            end
           end
         end
       end
@@ -2452,13 +3038,9 @@ export class MiliastraSimulator {
 
       -- 6. Global Game Engine Object
       game = {
-        GetUICanvasSize = function()
-          return sim.width, sim.height
-        end,
+        GetUICanvasSize = _FastGetCanvasSize,
 
-        GetCursorUIPos = function()
-          return sim.cursorX, sim.cursorY
-        end,
+        GetCursorUIPos = _FastGetCursorPos,
 
         InstantiateClientUIControl = function(templateId, parent)
           local pRaw = parent and parent._raw or sim.rootControl
@@ -2887,29 +3469,116 @@ export class MiliastraSimulator {
       ctrl.anchoredPositionY = node.y || 0;
       ctrl.sizeDeltaX = node.width !== undefined ? node.width : 100;
       ctrl.sizeDeltaY = node.height !== undefined ? node.height : 40;
+      const mirrorSignX = node.mirrorX ? -1 : 1;
+      const mirrorSignY = node.mirrorY ? -1 : 1;
+      ctrl.localScaleX = mirrorSignX * (node.scaleX !== undefined ? node.scaleX : 1);
+      ctrl.localScaleY = mirrorSignY * (node.scaleY !== undefined ? node.scaleY : 1);
+      ctrl.localRotationZ = node.rotationZ || 0;
       ctrl.interactable = node.interactable !== false;
       ctrl.raycastTarget = Boolean(node.raycastTarget);
-      ctrl.visible = node.visible !== false;
+      ctrl.active = node.active !== false;
+      ctrl.visible = node.visible !== false && node.active !== false;
 
+      if (node.resourceId) {
+        ctrl.resourceId = Number(node.resourceId) || 100001;
+      }
       if (node.bgColor) {
-        ctrl.bgColor = { ...node.bgColor };
+        ctrl.SetBgColor(node.bgColor);
       }
       if (node.imageColor) {
-        ctrl.imageColor = { ...node.imageColor };
-        ctrl._explicitImageColor = true;
+        ctrl.SetImageColor(node.imageColor);
       }
       if (node.text !== undefined) {
         ctrl.text = node.text;
         ctrl.fontSize = node.fontSize || 14;
-        if (node.fontColor) ctrl.fontColor = { ...node.fontColor };
+        ctrl.adaptiveFontSize = Boolean(node.adaptiveFontSize);
+        ctrl.minFontSize = node.minFontSize || 12;
+        ctrl.enableOutline = Boolean(node.enableOutline);
+        ctrl.outlineColor = node.outlineColor || null;
+        if (node.alignH) {
+          ctrl.horizontalAlignment = node.alignH === 'center' ? 1 : (node.alignH === 'right' ? 2 : 0);
+        }
+        if (node.alignV) {
+          ctrl.verticalAlignment = node.alignV === 'middle' ? 1 : (node.alignV === 'bottom' ? 2 : 0);
+        }
+        if (node.fontColor) ctrl.SetFontColor(node.fontColor);
       }
-      if (node.enableSoftEdge) {
+      if (node.enableMask) {
+        ctrl.enableMask = true;
+        ctrl.enableSoftEdge = Boolean(node.enableSoftEdge);
+        ctrl.softMode = node.softMode || 'Percentage';
+        ctrl.softRangeH = node.softRangeH ?? 43.11;
+        ctrl.softRangeV = node.softRangeV ?? 39.67;
+        ctrl.softEdgeWidthX = node.softEdgeWidthX || 12;
+        ctrl.softEdgeWidthY = node.softEdgeWidthY || 12;
+        ctrl.enableFillByProgress = Boolean(node.enableFillByProgress);
+        ctrl.fillShape = node.fillShape || 'Vertical';
+        ctrl.fillDirection = node.fillDirection || 'From Bottom to Top';
+        ctrl.fillStartLocation = node.fillStartLocation || 'Top';
+        ctrl.fillAmount = node.fillAmount !== undefined ? node.fillAmount : 100;
+        ctrl.invertMask = Boolean(node.invertMask);
+      } else if (node.enableSoftEdge) {
         ctrl.enableSoftEdge = true;
         ctrl.softEdgeWidthX = node.softEdgeWidthX || 8;
         ctrl.softEdgeWidthY = node.softEdgeWidthY || 8;
       }
       if (node.referencedPrefabIndex) {
         ctrl.referencedPrefabIndex = node.referencedPrefabIndex;
+      }
+      if (node.className === 'ClientUITextWindowControl') {
+        ctrl.interactable = node.interactable !== false;
+        ctrl.showScrollBar = node.showScrollBar !== false;
+      }
+      if (node.className === 'ClientUIContainerControl') {
+        ctrl.isolateNavigation = Boolean(node.isolateNavigation);
+        ctrl.disableKeyEventPassthrough = Boolean(node.disableKeyEventPassthrough);
+        ctrl.disableCursorEventPassthrough = Boolean(node.disableCursorEventPassthrough);
+        ctrl.showCursor = Boolean(node.showCursor);
+      }
+      if (node.className === 'ClientUICursorEventAreaControl') {
+        ctrl.persistentAreaPreview = Boolean(node.persistentAreaPreview);
+        ctrl.raycastTarget = Boolean(node.raycastTarget);
+      }
+      if (node.className === 'ClientUIGridScrollerControl') {
+        ctrl.interactable = node.interactable !== false;
+        ctrl.showScrollBar = node.showScrollBar !== false;
+        ctrl.raycastTarget = node.raycastTarget !== false;
+        ctrl.scrollDirection = (node.scrollDirection === 'Horizontal' || node.scrollDirection === 0) ? 0 : 1;
+        ctrl.layoutConstraint = (node.layoutConstraint === 'Fixed' || node.layoutConstraint === 1) ? 1 : 0;
+        ctrl.layoutConstraintFixedCount = ctrl.layoutConstraint === 1 ? Math.max(1, Number(node.layoutConstraintFixedCount) || 3) : 0;
+        ctrl.itemPrefabIndex = Number(node.itemPrefabIndex) !== undefined ? Number(node.itemPrefabIndex) : 1073741954;
+        ctrl.itemCount = Math.max(0, Number(node.itemCount) ?? 12);
+        ctrl.itemWidth = Math.max(12, Number(node.itemWidth) || 56);
+        ctrl.itemHeight = Math.max(12, Number(node.itemHeight) || 36);
+        ctrl.spacingX = Math.max(0, Number(node.spacingX) ?? 6);
+        ctrl.spacingY = Math.max(0, Number(node.spacingY) ?? 6);
+        ctrl.paddingTop = Math.max(0, Number(node.paddingTop) ?? 6);
+        ctrl.paddingBottom = Math.max(0, Number(node.paddingBottom) ?? 6);
+        ctrl.paddingLeft = Math.max(0, Number(node.paddingLeft) ?? 6);
+        ctrl.paddingRight = Math.max(0, Number(node.paddingRight) ?? 6);
+        ctrl.scrollProgress = Math.max(0, Math.min(1, Number(node.scrollProgress) || 0));
+        ctrl.gridPreviewMode = node.gridPreviewMode || 'template';
+      }
+      if (node.className === 'ClientUIFullscreenAnimationControl' || node.className === 'ClientUIAnimationControl') {
+        ctrl.animationId = Number(node.animationId) || 0;
+        ctrl.playSoundEffect = Boolean(node.playSoundEffect);
+        ctrl.layer = Number(node.layer) || 0;
+        ctrl._animPlaying = ctrl.animationId > 0;
+        ctrl._animStartTime = performance.now();
+        ctrl._animLastRestart = 0;
+      }
+      if (node.className === 'ClientUIKeyHintControl') {
+        ctrl.keyboardKeyCode = node.keyboardKeyCode !== undefined ? Number(node.keyboardKeyCode) : 2;
+        ctrl.controllerKeyCode = node.controllerKeyCode !== undefined ? Number(node.controllerKeyCode) : 6;
+        ctrl.previewKeyHintDevice = node.previewKeyHintDevice || 'keyboard';
+        ctrl.playerCustomKeyOverride = node.playerCustomKeyOverride || '';
+      }
+      if (node.className === 'ClientUIPresetButtonControl') {
+        ctrl.clickAudioId = node.clickAudioId !== undefined ? node.clickAudioId : 1001;
+        ctrl.normalStatusNodeKey = node.normalStatusNodeKey || '';
+        ctrl.hoverStatusNodeKey = node.hoverStatusNodeKey || '';
+        ctrl.pressedStatusNodeKey = node.pressedStatusNodeKey || '';
+        ctrl.disabledStatusNodeKey = node.disabledStatusNodeKey || '';
       }
 
       this.controlsById.set(ctrl.id, ctrl);
@@ -2919,6 +3588,32 @@ export class MiliastraSimulator {
         mountScriptHelper(ctrl, node.script);
       }
     }
+
+    // Wire 1-tier direct child status nodes for all ClientUIPresetButtonControl instances
+    for (const ctrl of this.controlsById.values()) {
+      if (ctrl.className !== 'ClientUIPresetButtonControl') continue;
+      const resolveDirectChild = (keyOrName) => {
+        if (!keyOrName) return null;
+        const c = createdControls.get(keyOrName);
+        if (c && c.parent === ctrl) return c;
+        return ctrl.children.find(ch => ch.name === keyOrName) || null;
+      };
+      ctrl.normalStatusCtrl = resolveDirectChild(ctrl.normalStatusNodeKey);
+      ctrl.hoverStatusCtrl = resolveDirectChild(ctrl.hoverStatusNodeKey);
+      ctrl.pressedStatusCtrl = resolveDirectChild(ctrl.pressedStatusNodeKey);
+      ctrl.disabledStatusCtrl = resolveDirectChild(ctrl.disabledStatusNodeKey);
+      ctrl._statusChildList = [
+        ctrl.normalStatusCtrl,
+        ctrl.hoverStatusCtrl,
+        ctrl.pressedStatusCtrl,
+        ctrl.disabledStatusCtrl
+      ].filter((v, i, arr) => v && arr.indexOf(v) === i);
+      ctrl._hasStateMachine = ctrl._statusChildList.length > 0;
+      if (ctrl._hasStateMachine) {
+        this.hasAnyCursorListeners = true;
+      }
+    }
+    this.updateButtonStateMachines();
 
     lua.lua_getglobal(this.L, to_luastring('_StartMountedScripts'));
     if (lua.lua_isfunction(this.L, -1)) {
@@ -3033,7 +3728,6 @@ local maxHorizontalSpeed = 420
 function OnStart()
     image = script.object
     script:EnableUpdate(true)
-    image.imageColor = Color.FromRGB(255, 0, 0)
 end
 
 function Bounce()
@@ -3207,6 +3901,7 @@ end`;
     this.log(`Canvas Viewport: ${this.width} x ${this.height}`, 'info');
 
     const resolvedScene = sceneConfig || this.buildDefaultCrossScriptBounceScene(luaCode || '');
+    this.hasMountedScripts = Boolean(resolvedScene);
     if (resolvedScene) {
       this.log('◈ Mounting Multi-Script Editor Hierarchy Scene...', 'info');
       this.mountSceneHierarchy(resolvedScene);
@@ -3248,7 +3943,7 @@ end`;
 
     this.animationFrameId = requestAnimationFrame((now) => {
       const elapsed = now - this.lastTime;
-      if (elapsed < 11.0) {
+      if (elapsed <= 0) {
         this.loop();
         return;
       }
@@ -3266,7 +3961,7 @@ end`;
 
       if (!this.isPaused && this.L) {
         // 1. Update active tweens and sequences in Lua
-        lua.lua_getglobal(this.L, to_luastring('_UpdateAllTweens'));
+        lua.lua_getglobal(this.L, LUA_STR_UPDATE_TWEENS);
         if (lua.lua_isfunction(this.L, -1)) {
           lua.lua_pushnumber(this.L, dt);
           if (lua.lua_pcall(this.L, 1, 0, 0) !== lua.LUA_OK) {
@@ -3279,7 +3974,7 @@ end`;
 
         // 2. Call global OnUpdate(dt) in Lua if enabled
         if (this.updateEnabled) {
-          lua.lua_getglobal(this.L, to_luastring('OnUpdate'));
+          lua.lua_getglobal(this.L, LUA_STR_ON_UPDATE);
           if (lua.lua_isfunction(this.L, -1)) {
             lua.lua_pushnumber(this.L, dt);
             if (lua.lua_pcall(this.L, 1, 0, 0) !== lua.LUA_OK) {
@@ -3292,15 +3987,17 @@ end`;
         }
 
         // 3. Call per-control mounted scripts OnUpdate(dt) / OnLevelUpdate(dt)
-        lua.lua_getglobal(this.L, to_luastring('_UpdateMountedScripts'));
-        if (lua.lua_isfunction(this.L, -1)) {
-          lua.lua_pushnumber(this.L, dt);
-          if (lua.lua_pcall(this.L, 1, 0, 0) !== lua.LUA_OK) {
-            const err = getLuaStackString(this.L, -1);
-            this.log(`[Mounted Script Update Error]: ${err}`, 'error');
+        if (this.hasMountedScripts) {
+          lua.lua_getglobal(this.L, LUA_STR_UPDATE_MOUNTED);
+          if (lua.lua_isfunction(this.L, -1)) {
+            lua.lua_pushnumber(this.L, dt);
+            if (lua.lua_pcall(this.L, 1, 0, 0) !== lua.LUA_OK) {
+              const err = getLuaStackString(this.L, -1);
+              this.log(`[Mounted Script Update Error]: ${err}`, 'error');
+            }
+          } else {
+            lua.lua_pop(this.L, 1);
           }
-        } else {
-          lua.lua_pop(this.L, 1);
         }
       }
 
@@ -3342,29 +4039,461 @@ end`;
   }
 
   renderControlNode(ctrl, parentBounds = null) {
-    if (!ctrl || !ctrl.visible || !ctrl.alive) return;
+    if (!ctrl || !ctrl.visible || !ctrl.alive || ctrl.active === false) return;
 
     const ctx = this.ctx;
     const bounds = ctrl.getScreenBounds(this.width, this.height, parentBounds);
     const canvasY = this.height - bounds.top; // Convert bottom-left to top-left for Canvas2D
     const rotZ = ctrl.localRotationZ || 0;
+    const mirrorSignX = (bounds.worldScaleX !== undefined && bounds.worldScaleX < 0) ? -1 : 1;
+    const mirrorSignY = (bounds.worldScaleY !== undefined && bounds.worldScaleY < 0) ? -1 : 1;
+    const hasTransform = rotZ !== 0 || mirrorSignX < 0 || mirrorSignY < 0;
 
-    if (rotZ !== 0) {
+    if (hasTransform) {
       ctx.save();
       const pivotCanvasX = bounds.pivotScreenX !== undefined ? bounds.pivotScreenX : (bounds.left + bounds.width / 2);
       const pivotCanvasY = bounds.pivotScreenY !== undefined ? (this.height - bounds.pivotScreenY) : (canvasY + bounds.height / 2);
-      const scaleSign = (bounds.worldScaleX < 0 ? -1 : 1) * (bounds.worldScaleY < 0 ? -1 : 1);
-      ctx.translate(pivotCanvasX, pivotCanvasY);
-      ctx.rotate((-rotZ * scaleSign * Math.PI) / 180);
-      ctx.translate(-pivotCanvasX, -pivotCanvasY);
+      if (rotZ !== 0) {
+        ctx.translate(pivotCanvasX, pivotCanvasY);
+        ctx.rotate((-rotZ * Math.PI) / 180);
+        ctx.translate(-pivotCanvasX, -pivotCanvasY);
+      }
+      if (mirrorSignX < 0 || mirrorSignY < 0) {
+        const cx = bounds.left + bounds.width / 2;
+        const cy = canvasY + bounds.height / 2;
+        ctx.translate(cx, cy);
+        ctx.scale(mirrorSignX, mirrorSignY);
+        ctx.translate(-cx, -cy);
+      }
     }
 
-    // 1. Draw Background / Shape
-    const imgCol = (ctrl.imageColor && typeof ctrl.imageColor.r === 'number') ? ctrl.imageColor : normalizeColor(ctrl.imageColor, 0);
-    const bgCol = (ctrl.bgColor && typeof ctrl.bgColor.r === 'number') ? ctrl.bgColor : normalizeColor(ctrl.bgColor, 0);
+    // 1. Draw Background / Shape (with special Keycap / Gamepad badge renderer for ClientUIKeyHintControl)
+    if (ctrl.className === 'ClientUIKeyHintControl') {
+      const kbMeta = getKeyboardKeyHintMeta(ctrl.keyboardKeyCode ?? 2);
+      const ctrlMeta = getControllerKeyHintMeta(ctrl.controllerKeyCode ?? 6);
+      const isGamepad = this.currentDevice === 2 || this.currentDevice === 4 || ctrl.previewKeyHintDevice === 'gamepad';
+      const customKey = String(ctrl.playerCustomKeyOverride || '').trim();
+      const labelStr = isGamepad ? (ctrlMeta.badgeText || 'A') : (customKey || kbMeta.badgeText || '1');
+      const isRebound = !isGamepad && Boolean(customKey && customKey !== kbMeta.badgeText);
 
-    if (bgCol.a > 0) {
-      ctx.fillStyle = `rgba(${bgCol.r}, ${bgCol.g}, ${bgCol.b}, ${bgCol.a / 255})`;
+      ctx.save();
+      const r = isGamepad ? Math.max(4, Math.min(bounds.height * 0.36, 12)) : 4;
+      ctx.beginPath();
+      if (ctx.roundRect) {
+        ctx.roundRect(bounds.left, canvasY, Math.max(2, bounds.width), Math.max(2, bounds.height), r);
+      } else {
+        ctx.rect(bounds.left, canvasY, Math.max(2, bounds.width), Math.max(2, bounds.height));
+      }
+      if (isGamepad) {
+        ctx.fillStyle = '#24201b';
+        ctx.fill();
+        ctx.lineWidth = 1.5;
+        ctx.strokeStyle = '#c8a86b';
+        ctx.stroke();
+        ctx.fillStyle = '#f5e6c4';
+      } else {
+        ctx.fillStyle = isRebound ? '#f7e4b2' : '#f2efe9';
+        ctx.fill();
+        ctx.lineWidth = 1.5;
+        ctx.strokeStyle = isRebound ? '#c2881b' : '#9c9488';
+        ctx.stroke();
+        ctx.fillStyle = '#181410';
+      }
+      const fontPx = Math.max(9, Math.min(28, Math.round(bounds.height * 0.48)));
+      ctx.font = `800 ${fontPx}px "JetBrains Mono", "Segoe UI Symbol", sans-serif`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(labelStr, bounds.left + bounds.width / 2, canvasY + bounds.height / 2 + 0.5);
+      ctx.restore();
+
+      if (hasTransform) {
+        ctx.restore();
+      }
+      for (const child of ctrl.children) {
+        this.renderControlNode(child, bounds);
+      }
+      return;
+    }
+
+    // 1B. ClientUIFullscreenAnimationControl (10002xxx) & ClientUIAnimationControl (10001xxx) ([img-1]..[img-5])
+    if (ctrl.className === 'ClientUIFullscreenAnimationControl' || ctrl.className === 'ClientUIAnimationControl') {
+      const isFull = ctrl.className === 'ClientUIFullscreenAnimationControl';
+      const vfx = getVfxPresetMeta(ctrl.animationId, ctrl.className);
+      if (vfx.id > 0 && ctrl._animPlaying !== false) {
+        const nowMs = performance.now();
+        if (ctrl._animRestartCount && ctrl._animRestartCount !== ctrl._animLastRestart) {
+          ctrl._animLastRestart = ctrl._animRestartCount;
+          ctrl._animStartTime = nowMs;
+        }
+        if (!ctrl._animStartTime) ctrl._animStartTime = nowMs;
+        const elapsedSec = (nowMs - ctrl._animStartTime) / 1000;
+
+        if (!isFull) {
+          // Localized Particle Effects around control/cursor area (10001001..10001160)
+          const rx = bounds.left;
+          const ry = canvasY;
+          const rw = Math.max(8, bounds.width);
+          const rh = Math.max(8, bounds.height);
+          const cx = rx + rw * 0.5;
+          const cy = ry + rh * 0.5;
+          const baseRadius = Math.max(18, Math.min(rw, rh) * 0.48);
+
+          if (vfx.looping) {
+            ctx.save();
+            // Soft pulsing particle aura
+            const pulse = 0.75 + 0.25 * Math.sin(elapsedSec * 3.2);
+            const auraGrad = ctx.createRadialGradient(cx, cy, 2, cx, cy, baseRadius * 1.15);
+            auraGrad.addColorStop(0, vfx.color + '66');
+            auraGrad.addColorStop(0.6, vfx.color + '28');
+            auraGrad.addColorStop(1, 'rgba(0,0,0,0)');
+            ctx.fillStyle = auraGrad;
+            ctx.beginPath();
+            ctx.arc(cx, cy, baseRadius * 1.15, 0, Math.PI * 2);
+            ctx.fill();
+
+            // 10 Orbiting & rising particle motes around the control/cursor area
+            for (let pi = 0; pi < 10; pi++) {
+              const angle = elapsedSec * (1.4 + (pi % 3) * 0.45) + (pi * Math.PI * 2) / 10;
+              const orbitR = baseRadius * (0.32 + 0.55 * ((Math.sin(elapsedSec * 2.1 + pi * 1.3) + 1) * 0.5));
+              const px = cx + Math.cos(angle) * orbitR;
+              const py = cy + Math.sin(angle) * orbitR - Math.sin(elapsedSec * 2.6 + pi) * 4;
+              const pSize = 2 + (pi % 3) * 1.1 * pulse;
+              ctx.globalAlpha = 0.55 + 0.4 * Math.sin(elapsedSec * 4 + pi);
+              ctx.fillStyle = pi % 3 === 0 ? '#ffffff' : vfx.color;
+              ctx.beginPath();
+              ctx.arc(px, py, pSize, 0, Math.PI * 2);
+              ctx.fill();
+            }
+            ctx.globalAlpha = 1;
+
+            // Compact ID tag showing the summoned looping particle ID
+            const tagText = `✦ #${vfx.id} [LOOP]`;
+            ctx.font = '700 9.5px "JetBrains Mono", monospace';
+            const tw = ctx.measureText(tagText).width + 10;
+            const bx = cx - tw * 0.5;
+            const by = cy - 9;
+            ctx.fillStyle = 'rgba(16, 13, 10, 0.84)';
+            ctx.fillRect(bx, by, tw, 18);
+            ctx.strokeStyle = vfx.color;
+            ctx.lineWidth = 1;
+            ctx.strokeRect(bx + 0.5, by + 0.5, tw - 1, 17);
+            ctx.fillStyle = '#f5e6c4';
+            ctx.textAlign = 'left';
+            ctx.textBaseline = 'middle';
+            ctx.fillText(tagText, bx + 5, by + 9.5);
+            ctx.restore();
+          } else {
+            // Non-looping localized particle burst (plays once for 1.5s and disappears automatically!)
+            const duration = 1.5;
+            if (elapsedSec <= duration) {
+              const prog = elapsedSec / duration;
+              const fade = 1 - prog;
+              ctx.save();
+
+              // Expanding shockwave ring
+              ctx.globalAlpha = fade * 0.85;
+              ctx.strokeStyle = vfx.color;
+              ctx.lineWidth = 2 * fade + 0.5;
+              ctx.beginPath();
+              ctx.arc(cx, cy, baseRadius * (0.25 + prog * 1.05), 0, Math.PI * 2);
+              ctx.stroke();
+
+              // 12 Outward-flying particle sparks
+              for (let pi = 0; pi < 12; pi++) {
+                const ang = (pi * Math.PI * 2) / 12 + (pi % 2) * 0.18;
+                const speedFactor = 0.65 + (pi % 3) * 0.25;
+                const dist = baseRadius * 1.25 * Math.pow(prog, 0.7) * speedFactor;
+                const px = cx + Math.cos(ang) * dist;
+                const py = cy + Math.sin(ang) * dist + prog * prog * 10;
+                const pRad = Math.max(1, (3.2 - prog * 2.2) * (pi % 2 === 0 ? 1.15 : 0.85));
+                ctx.globalAlpha = fade;
+                ctx.fillStyle = pi % 3 === 0 ? '#ffffff' : vfx.color;
+                ctx.beginPath();
+                ctx.arc(px, py, pRad, 0, Math.PI * 2);
+                ctx.fill();
+              }
+
+              // Summoned ID indicator during the burst (auto-disappears when burst completes)
+              const tagText = `💥 #${vfx.id} [1-SHOT]`;
+              ctx.globalAlpha = Math.min(1, fade * 1.35);
+              ctx.font = '700 9.5px "JetBrains Mono", monospace';
+              const tw = ctx.measureText(tagText).width + 10;
+              const bx = cx - tw * 0.5;
+              const by = cy - 9;
+              ctx.fillStyle = 'rgba(16, 13, 10, 0.86)';
+              ctx.fillRect(bx, by, tw, 18);
+              ctx.strokeStyle = vfx.color;
+              ctx.lineWidth = 1;
+              ctx.strokeRect(bx + 0.5, by + 0.5, tw - 1, 17);
+              ctx.fillStyle = '#fff4ec';
+              ctx.textAlign = 'left';
+              ctx.textBaseline = 'middle';
+              ctx.fillText(tagText, bx + 5, by + 9.5);
+              ctx.restore();
+            } else {
+              // Auto-finish and go away by themselves after the 1-shot cycle ends
+              ctrl._animPlaying = false;
+            }
+          }
+        } else {
+          // FullscreenUIAnimationControl (10002001..10002037)
+          const rx = 0;
+          const ry = 0;
+          const rw = this.width;
+          const rh = this.height;
+
+          ctx.save();
+          if (vfx.looping) {
+            // Looping bokeh / corner dimming vignette effect ([img-1])
+            const cx = rx + rw / 2;
+            const cy = ry + rh / 2;
+            const maxRad = Math.hypot(rw, rh) * 0.55;
+            const pulse = 0.72 + 0.22 * Math.sin(elapsedSec * 2.4);
+            const grad = ctx.createRadialGradient(cx, cy, maxRad * 0.35, cx, cy, maxRad);
+            grad.addColorStop(0, 'rgba(0,0,0,0)');
+            grad.addColorStop(0.72, `rgba(12,10,8,${(0.35 * pulse).toFixed(2)})`);
+            grad.addColorStop(1, vfx.color + '88');
+            ctx.fillStyle = grad;
+            ctx.fillRect(rx, ry, rw, rh);
+
+            // Corner bokeh motes
+            ctx.fillStyle = vfx.color;
+            const motes = [
+              { x: rx + rw * 0.08, y: ry + rh * 0.12, r: 6 },
+              { x: rx + rw * 0.92, y: ry + rh * 0.14, r: 5 },
+              { x: rx + rw * 0.10, y: ry + rh * 0.88, r: 7 },
+              { x: rx + rw * 0.90, y: ry + rh * 0.86, r: 6 }
+            ];
+            for (let mi = 0; mi < motes.length; mi++) {
+              const m = motes[mi];
+              const driftY = Math.sin(elapsedSec * 1.8 + mi * 1.5) * 6;
+              ctx.globalAlpha = 0.35 + 0.25 * Math.sin(elapsedSec * 2.5 + mi);
+              ctx.beginPath();
+              ctx.arc(m.x, m.y + driftY, m.r, 0, Math.PI * 2);
+              ctx.fill();
+            }
+            ctx.globalAlpha = 1;
+
+            // Validation indicator badge
+            const tagText = `⛶ Fullscreen VFX #${vfx.id} (${vfx.name} • Looping)`;
+            ctx.font = '700 10px "JetBrains Mono", monospace';
+            const tw = ctx.measureText(tagText).width + 14;
+            const bx = rx + 12;
+            const by = ry + 10;
+            ctx.fillStyle = 'rgba(16, 13, 10, 0.84)';
+            ctx.fillRect(bx, by, tw, 20);
+            ctx.strokeStyle = vfx.color;
+            ctx.lineWidth = 1;
+            ctx.strokeRect(bx + 0.5, by + 0.5, tw - 1, 19);
+            ctx.fillStyle = '#f5e6c4';
+            ctx.textAlign = 'left';
+            ctx.textBaseline = 'middle';
+            ctx.fillText(tagText, bx + 7, by + 10.5);
+          } else {
+            // Non-looping 1.8s fullscreen glitch / impact burst effect ([img-1])
+            const duration = 1.8;
+            const activeBurst = elapsedSec <= duration;
+            if (activeBurst) {
+              const t = 1 - elapsedSec / duration;
+              ctx.fillStyle = `rgba(255, 94, 126, ${(0.18 * t).toFixed(3)})`;
+              ctx.fillRect(rx, ry, rw, rh);
+              // Glitch scanline slices
+              const sliceCount = 6;
+              for (let si = 0; si < sliceCount; si++) {
+                const sy = ry + ((Math.sin(elapsedSec * 28 + si * 3.7) * 0.5 + 0.5) * (rh - 14));
+                const sh = 4 + (si % 3) * 4;
+                ctx.fillStyle = si % 2 === 0 ? `rgba(56, 182, 255, ${(0.35 * t).toFixed(2)})` : `rgba(255, 94, 126, ${(0.38 * t).toFixed(2)})`;
+                ctx.fillRect(rx, sy, rw, sh);
+              }
+              const tagText = `⚡ VFX #${vfx.id} (${vfx.name}) • PLAYING 1-SHOT GLITCH`;
+              ctx.font = '700 10px "JetBrains Mono", monospace';
+              const tw = ctx.measureText(tagText).width + 14;
+              const bx = rx + 12;
+              const by = ry + 10;
+              ctx.fillStyle = 'rgba(16, 13, 10, 0.86)';
+              ctx.fillRect(bx, by, tw, 20);
+              ctx.strokeStyle = '#ff5e7e';
+              ctx.lineWidth = 1;
+              ctx.strokeRect(bx + 0.5, by + 0.5, tw - 1, 19);
+              ctx.fillStyle = '#ffe0e6';
+              ctx.textAlign = 'left';
+              ctx.textBaseline = 'middle';
+              ctx.fillText(tagText, bx + 7, by + 10.5);
+            } else {
+              ctrl._animPlaying = false;
+            }
+          }
+          ctx.restore();
+        }
+      }
+      if (hasTransform) ctx.restore();
+      for (const child of ctrl.children) {
+        this.renderControlNode(child, bounds);
+      }
+      return;
+    }
+
+    // 1C. ClientUIReferenceControl ([img-2])
+    if (ctrl.className === 'ClientUIReferenceControl') {
+      const tpl = getReferenceTemplateMeta(ctrl.referencedPrefabIndex);
+      ctx.save();
+      ctx.fillStyle = 'rgba(34, 44, 58, 0.85)';
+      ctx.fillRect(bounds.left, canvasY, Math.max(4, bounds.width), Math.max(4, bounds.height));
+      ctx.strokeStyle = 'rgba(130, 180, 235, 0.75)';
+      ctx.lineWidth = 1.2;
+      ctx.strokeRect(bounds.left + 0.5, canvasY + 0.5, Math.max(2, bounds.width - 1), Math.max(2, bounds.height - 1));
+      ctx.fillStyle = '#e3f0ff';
+      ctx.font = '700 10px "JetBrains Mono", monospace';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(`🔗 ${tpl.name} (${tpl.index || 'None'})`, bounds.left + bounds.width / 2, canvasY + bounds.height / 2);
+      ctx.restore();
+      if (hasTransform) ctx.restore();
+      for (const child of ctrl.children) {
+        this.renderControlNode(child, bounds);
+      }
+      return;
+    }
+
+    // 1D. ClientUIGridScrollerControl ([img-1], [img-2])
+    if (ctrl.className === 'ClientUIGridScrollerControl') {
+      ctx.save();
+      // Outer GridScroller Box & Clip Region
+      ctx.fillStyle = 'rgba(24, 20, 16, 0.78)';
+      ctx.fillRect(bounds.left, canvasY, Math.max(4, bounds.width), Math.max(4, bounds.height));
+      ctx.strokeStyle = 'rgba(196, 160, 89, 0.62)';
+      ctx.lineWidth = 1.2;
+      ctx.strokeRect(bounds.left + 0.5, canvasY + 0.5, Math.max(2, bounds.width - 1), Math.max(2, bounds.height - 1));
+
+      ctx.beginPath();
+      ctx.rect(bounds.left + 1, canvasY + 1, Math.max(2, bounds.width - 2), Math.max(2, bounds.height - 2));
+      ctx.clip();
+
+      const isVert = ctrl.scrollDirection === undefined || ctrl.scrollDirection === 1 || ctrl.scrollDirection === 'Vertical';
+      const isFixed = ctrl.layoutConstraint === 1 || ctrl.layoutConstraint === 'Fixed';
+      const itemW = Math.max(12, Number(ctrl.itemWidth) || 56);
+      const itemH = Math.max(12, Number(ctrl.itemHeight) || 36);
+      const spaceX = Math.max(0, Number(ctrl.spacingX) ?? 6);
+      const spaceY = Math.max(0, Number(ctrl.spacingY) ?? 6);
+      const padT = Math.max(0, Number(ctrl.paddingTop) ?? 6);
+      const padB = Math.max(0, Number(ctrl.paddingBottom) ?? 6);
+      const padL = Math.max(0, Number(ctrl.paddingLeft) ?? 6);
+      const padR = Math.max(0, Number(ctrl.paddingRight) ?? 6);
+      const sbRes = ctrl.showScrollBar !== false ? 10 : 0;
+
+      // If RefreshItems was called in Lua, render the live instantiated slot controls inside the clipped region
+      if (ctrl._hasRefreshedItems && ctrl.children && ctrl.children.length > 0) {
+        const count = Math.max(0, Number(ctrl.itemCount) ?? ctrl.children.length);
+        let crossCount = 1;
+        if (isFixed) {
+          crossCount = Math.max(1, Math.round(Number(ctrl.layoutConstraintFixedCount) || 3));
+        } else if (isVert) {
+          const availW = Math.max(itemW, bounds.width - padL - padR - sbRes);
+          crossCount = Math.max(1, Math.floor((availW + spaceX) / (itemW + spaceX)));
+        } else {
+          const availH = Math.max(itemH, bounds.height - padT - padB - sbRes);
+          crossCount = Math.max(1, Math.floor((availH + spaceY) / (itemH + spaceY)));
+        }
+        const scrollLines = count > 0 ? Math.ceil(count / crossCount) : 0;
+        const contentLen = scrollLines > 0
+          ? (isVert ? (padT + padB - spaceY + (itemH + spaceY) * scrollLines) : (padL + padR - spaceX + (itemW + spaceX) * scrollLines))
+          : 0;
+        const maxScroll = Math.max(0, contentLen - (isVert ? bounds.height : bounds.width));
+        const prog = Math.max(0, Math.min(1, Number(ctrl.scrollProgress) || 0));
+        const scrollPx = maxScroll * prog;
+        const scrolledBounds = {
+          ...bounds,
+          left: bounds.left - (!isVert ? scrollPx : 0),
+          right: bounds.right - (!isVert ? scrollPx : 0),
+          top: bounds.top + (isVert ? scrollPx : 0),
+          bottom: bounds.bottom + (isVert ? scrollPx : 0)
+        };
+        for (let i = 0; i < ctrl.children.length; i++) {
+          const child = ctrl.children[i];
+          if (child.visible && child.alive) {
+            this.renderControlNode(child, scrolledBounds);
+          }
+        }
+      } else {
+        // Otherwise draw the Editor Content Template repeating copies ([img-2])
+        const tpl = getReferenceTemplateMeta(ctrl.itemPrefabIndex ?? 1073741954);
+        const count = Math.max(0, Number(ctrl.itemCount) ?? 12);
+        let crossCount = 1;
+        if (isFixed) {
+          crossCount = Math.max(1, Math.round(Number(ctrl.layoutConstraintFixedCount) || 3));
+        } else if (isVert) {
+          const availW = Math.max(itemW, bounds.width - padL - padR - sbRes);
+          crossCount = Math.max(1, Math.floor((availW + spaceX) / (itemW + spaceX)));
+        } else {
+          const availH = Math.max(itemH, bounds.height - padT - padB - sbRes);
+          crossCount = Math.max(1, Math.floor((availH + spaceY) / (itemH + spaceY)));
+        }
+
+        const scrollLines = count > 0 ? Math.ceil(count / crossCount) : 0;
+        const contentLen = scrollLines > 0
+          ? (isVert ? (padT + padB - spaceY + (itemH + spaceY) * scrollLines) : (padL + padR - spaceX + (itemW + spaceX) * scrollLines))
+          : 0;
+        const maxScroll = Math.max(0, contentLen - (isVert ? bounds.height : bounds.width));
+        const prog = Math.max(0, Math.min(1, Number(ctrl.scrollProgress) || 0));
+        const scrollPx = maxScroll * prog;
+
+        for (let idx = 0; idx < count; idx++) {
+          const col = isVert ? (idx % crossCount) : Math.floor(idx / crossCount);
+          const row = isVert ? Math.floor(idx / crossCount) : (idx % crossCount);
+          const cx = bounds.left + padL + col * (itemW + spaceX) - (!isVert ? scrollPx : 0);
+          const cy = canvasY + padT + row * (itemH + spaceY) - (isVert ? scrollPx : 0);
+
+          ctx.fillStyle = 'rgba(46, 56, 72, 0.78)';
+          ctx.fillRect(cx, cy, itemW, itemH);
+          ctx.strokeStyle = 'rgba(145, 190, 242, 0.7)';
+          ctx.lineWidth = 1;
+          ctx.strokeRect(cx + 0.5, cy + 0.5, itemW - 1, itemH - 1);
+          ctx.fillStyle = '#eaf4ff';
+          ctx.font = '700 9px "JetBrains Mono", monospace';
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          ctx.fillText(`[${idx}] ${tpl.icon}`, cx + itemW / 2, cy + itemH / 2);
+        }
+      }
+
+      // Draw Scrollbar (Vertical on right or Horizontal on bottom) when showScrollBar is true
+      if (ctrl.showScrollBar !== false) {
+        const prog = Math.max(0, Math.min(1, Number(ctrl.scrollProgress) || 0));
+        if (isVert) {
+          const sbW = 5;
+          const sbX = bounds.right - sbW - 3;
+          const sbTop = canvasY + 10;
+          const sbH = Math.max(10, bounds.height - 20);
+          ctx.fillStyle = 'rgba(15, 18, 22, 0.62)';
+          ctx.fillRect(sbX, sbTop, sbW, sbH);
+          const thumbH = Math.max(8, sbH * 0.44);
+          const thumbY = sbTop + (sbH - thumbH) * prog;
+          ctx.fillStyle = '#dce1e7';
+          ctx.fillRect(sbX + 0.5, thumbY, sbW - 1, thumbH);
+        } else {
+          const sbH = 5;
+          const sbY = canvasY + bounds.height - sbH - 3;
+          const sbLeft = bounds.left + 10;
+          const sbW = Math.max(10, bounds.width - 20);
+          ctx.fillStyle = 'rgba(15, 18, 22, 0.62)';
+          ctx.fillRect(sbLeft, sbY, sbW, sbH);
+          const thumbW = Math.max(8, sbW * 0.44);
+          const thumbX = sbLeft + (sbW - thumbW) * prog;
+          ctx.fillStyle = '#dce1e7';
+          ctx.fillRect(thumbX, sbY + 0.5, thumbW, sbH - 1);
+        }
+      }
+
+      ctx.restore();
+      if (hasTransform) ctx.restore();
+      return;
+    }
+
+    const imgCol = ctrl.imageColor;
+    const bgCol = ctrl.bgColor;
+
+    if (bgCol && bgCol.a > 0) {
+      ctx.fillStyle = ctrl._bgColorCss || `rgba(${bgCol.r}, ${bgCol.g}, ${bgCol.b}, ${bgCol.a / 255})`;
       ctx.fillRect(bounds.left, canvasY, bounds.width, bounds.height);
       if (ctrl.className === 'ClientUIPresetButtonControl' || ctrl.raycastTarget) {
         ctx.strokeStyle = 'rgba(196, 160, 89, 0.65)';
@@ -3373,122 +4502,181 @@ end`;
       }
     }
 
-    if (imgCol.a > 0) {
-      const colorStr = `rgba(${imgCol.r}, ${imgCol.g}, ${imgCol.b}, ${imgCol.a / 255})`;
+    if (imgCol && imgCol.a > 0) {
+      const colorStr = ctrl._imageColorCss || `rgba(${imgCol.r}, ${imgCol.g}, ${imgCol.b}, ${imgCol.a / 255})`;
       const shape = ASSET_SHAPES[ctrl.resourceId] || 'rectangle';
+      const hasProgressMask = Boolean(ctrl.enableMask && (ctrl.enableFillByProgress || ctrl.invertMask));
+      const hasMaskSoftEdge = Boolean(ctrl.enableMask && ctrl.enableSoftEdge);
 
       // Fast path for standard rectangles (avoids ctx.save/restore overhead across hundreds of grid cells)
-      if (shape === 'rectangle' && (!ctrl.enableSoftEdge || (ctrl.softEdgeWidthX <= 0 && ctrl.softEdgeWidthY <= 0))) {
+      if (!hasProgressMask && !hasMaskSoftEdge && shape === 'rectangle' && (!ctrl.enableSoftEdge || (ctrl.softEdgeWidthX <= 0 && ctrl.softEdgeWidthY <= 0))) {
         ctx.fillStyle = colorStr;
         ctx.fillRect(bounds.left, canvasY, Math.max(1, bounds.width), Math.max(1, bounds.height));
       } else {
         ctx.save();
-        ctx.fillStyle = colorStr;
+        if (hasProgressMask) {
+          const rawPct = ctrl.enableFillByProgress ? Math.max(0, Math.min(100, Number(ctrl.fillAmount) ?? 100)) : 100;
+          const visStart = ctrl.invertMask ? rawPct / 100 : 0;
+          const visEnd = ctrl.invertMask ? 1 : rawPct / 100;
+          ctx.beginPath();
+          if (visEnd > visStart + 0.001) {
+            const fShape = ctrl.fillShape || 'Vertical';
+            const fDir = ctrl.fillDirection || 'From Bottom to Top';
+            if (fShape === 'Horizontal') {
+              const x0 = fDir === 'From Right to Left' ? bounds.left + bounds.width * (1 - visEnd) : bounds.left + bounds.width * visStart;
+              const wClip = bounds.width * (visEnd - visStart);
+              ctx.rect(x0, canvasY, wClip, bounds.height);
+            } else if (fShape === 'Vertical') {
+              const y0 = fDir === 'From Top to Bottom' ? canvasY + bounds.height * visStart : canvasY + bounds.height * (1 - visEnd);
+              const hClip = bounds.height * (visEnd - visStart);
+              ctx.rect(bounds.left, y0, bounds.width, hClip);
+            } else {
+              const maxRad = (fShape === 'Radial90' ? 0.5 : (fShape === 'Radial180' ? 1 : 2)) * Math.PI;
+              const locMap = { Top: -Math.PI / 2, Right: 0, Bottom: Math.PI / 2, Left: Math.PI };
+              const baseRad = locMap[ctrl.fillStartLocation || 'Top'] ?? -Math.PI / 2;
+              const isCCW = fDir === 'Counterclockwise';
+              const cx = bounds.left + bounds.width / 2;
+              const cy = canvasY + bounds.height / 2;
+              const rClip = Math.hypot(bounds.width, bounds.height);
+              ctx.moveTo(cx, cy);
+              if (!isCCW) {
+                ctx.arc(cx, cy, rClip, baseRad + visStart * maxRad, baseRad + visEnd * maxRad, false);
+              } else {
+                ctx.arc(cx, cy, rClip, baseRad - visStart * maxRad, baseRad - visEnd * maxRad, true);
+              }
+              ctx.closePath();
+            }
+          }
+          ctx.clip();
+        }
+
+        if (hasMaskSoftEdge) {
+          const cx = bounds.left + bounds.width / 2;
+          const cy = canvasY + bounds.height / 2;
+          const rx = Math.max(1, bounds.width / 2);
+          const ry = Math.max(1, bounds.height / 2);
+          const maxR = Math.max(rx, ry);
+          let softFraction = 0.4;
+          if (ctrl.softMode === 'Pixels' || ctrl.softMode === 'Pixel') {
+            const avgPx = ((ctrl.softEdgeWidthX || 12) + (ctrl.softEdgeWidthY || 12)) * 0.5;
+            softFraction = Math.min(0.95, Math.max(0.05, avgPx / maxR));
+          } else {
+            const avgPct = ((ctrl.softRangeH ?? 43.11) + (ctrl.softRangeV ?? 39.67)) * 0.5;
+            softFraction = Math.min(0.95, Math.max(0.05, avgPct / 100));
+          }
+          const innerR = Math.max(0.1, maxR * (1 - softFraction));
+          const grad = ctx.createRadialGradient(cx, cy, innerR, cx, cy, maxR);
+          grad.addColorStop(0, colorStr);
+          grad.addColorStop(1, `rgba(${imgCol.r}, ${imgCol.g}, ${imgCol.b}, 0)`);
+          ctx.fillStyle = grad;
+        } else {
+          ctx.fillStyle = colorStr;
+        }
 
         if (shape === 'circle') {
-        const rx = Math.max(0.5, bounds.width / 2);
-        const ry = Math.max(0.5, bounds.height / 2);
-        const cx = bounds.left + bounds.width / 2;
-        const cy = canvasY + bounds.height / 2;
+          const rx = Math.max(0.5, bounds.width / 2);
+          const ry = Math.max(0.5, bounds.height / 2);
+          const cx = bounds.left + bounds.width / 2;
+          const cy = canvasY + bounds.height / 2;
 
-        ctx.beginPath();
-        if (typeof ctx.ellipse === 'function') {
-          ctx.ellipse(cx, cy, rx, ry, 0, 0, Math.PI * 2);
-        } else {
-          ctx.arc(cx, cy, Math.min(rx, ry), 0, Math.PI * 2);
-        }
-
-        if (ctrl.enableSoftEdge) {
-          if (imgCol.r === 0 && imgCol.g === 0 && imgCol.b === 0) {
-            // Shadow soft edge gradient
-            const grad = ctx.createRadialGradient(cx, cy, Math.max(0.1, Math.min(rx, ry) * 0.1), cx, cy, Math.max(rx, ry));
-            grad.addColorStop(0, `rgba(0, 0, 0, ${imgCol.a / 255})`);
-            grad.addColorStop(0.7, `rgba(0, 0, 0, ${imgCol.a * 0.5 / 255})`);
-            grad.addColorStop(1, 'rgba(0, 0, 0, 0)');
-            ctx.fillStyle = grad;
-            ctx.fill();
+          ctx.beginPath();
+          if (typeof ctx.ellipse === 'function') {
+            ctx.ellipse(cx, cy, rx, ry, 0, 0, Math.PI * 2);
           } else {
-            // 3D Ball / Spherical highlight shading for billiard balls
-            const avgR = Math.min(rx, ry);
-            const grad = ctx.createRadialGradient(cx - rx * 0.32, cy - ry * 0.32, Math.max(0.1, avgR * 0.05), cx, cy, Math.max(rx, ry));
-            const hlR = Math.min(255, Math.round(imgCol.r + 70));
-            const hlG = Math.min(255, Math.round(imgCol.g + 70));
-            const hlB = Math.min(255, Math.round(imgCol.b + 70));
-            const shR = Math.max(0, Math.round(imgCol.r - 50));
-            const shG = Math.max(0, Math.round(imgCol.g - 50));
-            const shB = Math.max(0, Math.round(imgCol.b - 50));
-            grad.addColorStop(0, `rgba(${hlR}, ${hlG}, ${hlB}, ${imgCol.a / 255})`);
-            grad.addColorStop(0.65, colorStr);
-            grad.addColorStop(1, `rgba(${shR}, ${shG}, ${shB}, ${imgCol.a / 255})`);
-            ctx.fillStyle = grad;
+            ctx.arc(cx, cy, Math.min(rx, ry), 0, Math.PI * 2);
+          }
+
+          if (ctrl.enableSoftEdge && !ctrl.enableMask) {
+            if (imgCol.r === 0 && imgCol.g === 0 && imgCol.b === 0) {
+              // Shadow soft edge gradient
+              const grad = ctx.createRadialGradient(cx, cy, Math.max(0.1, Math.min(rx, ry) * 0.1), cx, cy, Math.max(rx, ry));
+              grad.addColorStop(0, `rgba(0, 0, 0, ${imgCol.a / 255})`);
+              grad.addColorStop(0.7, `rgba(0, 0, 0, ${imgCol.a * 0.5 / 255})`);
+              grad.addColorStop(1, 'rgba(0, 0, 0, 0)');
+              ctx.fillStyle = grad;
+              ctx.fill();
+            } else {
+              // 3D Ball / Spherical highlight shading for billiard balls
+              const avgR = Math.min(rx, ry);
+              const grad = ctx.createRadialGradient(cx - rx * 0.32, cy - ry * 0.32, Math.max(0.1, avgR * 0.05), cx, cy, Math.max(rx, ry));
+              const hlR = Math.min(255, Math.round(imgCol.r + 70));
+              const hlG = Math.min(255, Math.round(imgCol.g + 70));
+              const hlB = Math.min(255, Math.round(imgCol.b + 70));
+              const shR = Math.max(0, Math.round(imgCol.r - 50));
+              const shG = Math.max(0, Math.round(imgCol.g - 50));
+              const shB = Math.max(0, Math.round(imgCol.b - 50));
+              grad.addColorStop(0, `rgba(${hlR}, ${hlG}, ${hlB}, ${imgCol.a / 255})`);
+              grad.addColorStop(0.65, colorStr);
+              grad.addColorStop(1, `rgba(${shR}, ${shG}, ${shB}, ${imgCol.a / 255})`);
+              ctx.fillStyle = grad;
+              ctx.fill();
+            }
+          } else {
             ctx.fill();
           }
-        } else {
+        } else if (shape === 'hollow_circle') {
+          const rx = Math.max(0.5, bounds.width / 2);
+          const ry = Math.max(0.5, bounds.height / 2);
+          const cx = bounds.left + bounds.width / 2;
+          const cy = canvasY + bounds.height / 2;
+          const innerRx = rx * 0.62;
+          const innerRy = ry * 0.62;
+
+          ctx.beginPath();
+          if (typeof ctx.ellipse === 'function') {
+            ctx.ellipse(cx, cy, rx, ry, 0, 0, Math.PI * 2, false);
+            ctx.ellipse(cx, cy, innerRx, innerRy, 0, 0, Math.PI * 2, true);
+          } else {
+            const radius = Math.min(rx, ry);
+            ctx.arc(cx, cy, radius, 0, Math.PI * 2, false);
+            ctx.arc(cx, cy, radius * 0.62, 0, Math.PI * 2, true);
+          }
+          ctx.closePath();
           ctx.fill();
-        }
-      } else if (shape === 'hollow_circle') {
-        const rx = Math.max(0.5, bounds.width / 2);
-        const ry = Math.max(0.5, bounds.height / 2);
-        const cx = bounds.left + bounds.width / 2;
-        const cy = canvasY + bounds.height / 2;
-        const innerRx = rx * 0.65;
-        const innerRy = ry * 0.65;
+        } else if (shape === 'triangle') {
+          const cx = bounds.left + bounds.width / 2;
+          ctx.beginPath();
+          ctx.moveTo(cx, canvasY);
+          ctx.lineTo(bounds.right, canvasY + bounds.height);
+          ctx.lineTo(bounds.left, canvasY + bounds.height);
+          ctx.closePath();
+          ctx.fill();
+        } else if (shape === 'star4') {
+          const cx = bounds.left + bounds.width / 2;
+          const cy = canvasY + bounds.height / 2;
+          const rx = Math.max(0.5, bounds.width / 2);
+          const ry = Math.max(0.5, bounds.height / 2);
 
-        ctx.beginPath();
-        if (typeof ctx.ellipse === 'function') {
-          ctx.ellipse(cx, cy, rx, ry, 0, 0, Math.PI * 2, false);
-          ctx.ellipse(cx, cy, innerRx, innerRy, 0, 0, Math.PI * 2, true);
-        } else {
-          const radius = Math.min(rx, ry);
-          ctx.arc(cx, cy, radius, 0, Math.PI * 2, false);
-          ctx.arc(cx, cy, radius * 0.65, 0, Math.PI * 2, true);
-        }
-        ctx.closePath();
-        ctx.fill();
-      } else if (shape === 'triangle') {
-        const cx = bounds.left + bounds.width / 2;
-        ctx.beginPath();
-        ctx.moveTo(cx, canvasY);
-        ctx.lineTo(bounds.right, canvasY + bounds.height);
-        ctx.lineTo(bounds.left, canvasY + bounds.height);
-        ctx.closePath();
-        ctx.fill();
-      } else if (shape === 'star4') {
-        const cx = bounds.left + bounds.width / 2;
-        const cy = canvasY + bounds.height / 2;
-        const outerR = Math.min(bounds.width, bounds.height) / 2;
-        const innerR = outerR * 0.38;
+          ctx.beginPath();
+          for (let i = 0; i < 8; i++) {
+            const angle = (i * Math.PI) / 4 - Math.PI / 2;
+            const scale = (i % 2 === 0) ? 1 : 0.36;
+            const px = cx + Math.cos(angle) * rx * scale;
+            const py = cy + Math.sin(angle) * ry * scale;
+            if (i === 0) ctx.moveTo(px, py);
+            else ctx.lineTo(px, py);
+          }
+          ctx.closePath();
+          ctx.fill();
+        } else if (shape === 'star5') {
+          const cx = bounds.left + bounds.width / 2;
+          const cy = canvasY + bounds.height / 2;
+          const rx = Math.max(0.5, bounds.width / 2);
+          const ry = Math.max(0.5, bounds.height / 2);
 
-        ctx.beginPath();
-        for (let i = 0; i < 8; i++) {
-          const angle = (i * Math.PI) / 4 - Math.PI / 2;
-          const r = (i % 2 === 0) ? outerR : innerR;
-          const px = cx + Math.cos(angle) * r;
-          const py = cy + Math.sin(angle) * r;
-          if (i === 0) ctx.moveTo(px, py);
-          else ctx.lineTo(px, py);
-        }
-        ctx.closePath();
-        ctx.fill();
-      } else if (shape === 'star5') {
-        const cx = bounds.left + bounds.width / 2;
-        const cy = canvasY + bounds.height / 2;
-        const outerR = Math.min(bounds.width, bounds.height) / 2;
-        const innerR = outerR * 0.42;
-
-        ctx.beginPath();
-        for (let i = 0; i < 10; i++) {
-          const angle = (i * Math.PI) / 5 - Math.PI / 2;
-          const r = (i % 2 === 0) ? outerR : innerR;
-          const px = cx + Math.cos(angle) * r;
-          const py = cy + Math.sin(angle) * r;
-          if (i === 0) ctx.moveTo(px, py);
-          else ctx.lineTo(px, py);
-        }
-        ctx.closePath();
-        ctx.fill();
-        } else {
-          // Rounded Rectangle with softEdgeWidth
+          ctx.beginPath();
+          for (let i = 0; i < 10; i++) {
+            const angle = (i * Math.PI) / 5 - Math.PI / 2;
+            const scale = (i % 2 === 0) ? 1 : 0.40;
+            const px = cx + Math.cos(angle) * rx * scale;
+            const py = cy + Math.sin(angle) * ry * scale;
+            if (i === 0) ctx.moveTo(px, py);
+            else ctx.lineTo(px, py);
+          }
+          ctx.closePath();
+          ctx.fill();
+        } else if (ctrl.enableSoftEdge && !ctrl.enableMask) {
+          // Rounded Rectangle with softEdgeWidth (used by standalone scripts like 8-Ball Pool)
           const cornerR = Math.min(bounds.width / 2, bounds.height / 2, Math.max(ctrl.softEdgeWidthX, 4));
           ctx.beginPath();
           if (ctx.roundRect) {
@@ -3497,46 +4685,234 @@ end`;
             ctx.rect(bounds.left, canvasY, Math.max(1, bounds.width), Math.max(1, bounds.height));
           }
           ctx.fill();
+        } else {
+          ctx.fillRect(bounds.left, canvasY, Math.max(1, bounds.width), Math.max(1, bounds.height));
         }
         ctx.restore();
       }
     }
 
-    // 2. Draw Text if present
+    // 2. Draw Text if present (supports plain text fast path + Rich Text tags <color>, <size>, <b>, <i>)
     if (ctrl.text && ctrl.text !== '') {
       ctx.save();
-      const fCol = normalizeColor(ctrl.fontColor, 255);
-      ctx.fillStyle = `rgba(${fCol.r}, ${fCol.g}, ${fCol.b}, ${fCol.a / 255})`;
+      const fCol = ctrl.fontColor;
+      const defaultFillStyle = ctrl._fontColorCss || `rgba(${fCol.r}, ${fCol.g}, ${fCol.b}, ${fCol.a / 255})`;
+      ctx.fillStyle = defaultFillStyle;
       const scaleFactor = Math.min(Math.abs(bounds.worldScaleX || 1), Math.abs(bounds.worldScaleY || 1));
-      const fontSize = Math.max(6, (ctrl.fontSize || 14) * scaleFactor);
-      ctx.font = `${fontSize}px "JetBrains Mono", "Segoe UI Symbol", "Apple Color Emoji", sans-serif`;
+      const rawText = String(ctrl.text);
+      const hasRichTags = /<\/?(?:b|i|color(?:=[^>]*)?|size(?:=[^>]*)?)>/i.test(rawText);
+      const cleanText = hasRichTags ? rawText.replace(/<\/?(?:b|i|color(?:=[^>]*)?|size(?:=[^>]*)?)>/gi, '') : rawText;
 
-      let textX = bounds.left;
-      if (ctrl.horizontalAlignment === 1) { // Middle
-        ctx.textAlign = 'center';
-        textX = bounds.left + bounds.width / 2;
-      } else if (ctrl.horizontalAlignment === 2) { // Right
-        ctx.textAlign = 'right';
-        textX = bounds.right;
-      } else {
-        ctx.textAlign = 'left';
+      let baseFontSize = ctrl.fontSize || 14;
+      if (ctrl.adaptiveFontSize && cleanText.length > 0) {
+        const minSz = Math.max(6, Math.min(baseFontSize, ctrl.minFontSize || 12));
+        const longestLineLen = Math.max(1, ...cleanText.split(/\r?\n/).map(l => l.length));
+        const fitW = Math.max(12, bounds.width - 8) / (longestLineLen * 0.6);
+        const fitH = Math.max(12, bounds.height - 6) * 0.82;
+        baseFontSize = Math.max(minSz, Math.min(baseFontSize, Math.floor(Math.min(fitW, fitH))));
       }
+      const fontSize = Math.max(6, Math.round(baseFontSize * scaleFactor * 2) * 0.5);
+      const lineHeight = Math.round(fontSize * 1.2 * 2) * 0.5;
 
+      if (!hasRichTags) {
+        ctx.font = `${fontSize}px "JetBrains Mono", "Segoe UI Symbol", "Apple Color Emoji", sans-serif`;
+        let textX = bounds.left + 4;
+        if (ctrl.horizontalAlignment === 1) { // Middle
+          ctx.textAlign = 'center';
+          textX = bounds.left + bounds.width / 2;
+        } else if (ctrl.horizontalAlignment === 2) { // Right
+          ctx.textAlign = 'right';
+          textX = bounds.right - 4;
+        } else {
+          ctx.textAlign = 'left';
+        }
+
+        // Split into lines (and wrap if adaptiveFontSize is OFF and text exceeds box width)
+        const maxLineW = Math.max(12, bounds.width - 8);
+        const rawLines = cleanText.split(/\r?\n/);
+        const lines = [];
+        if (ctrl.adaptiveFontSize) {
+          lines.push(rawLines.join(' '));
+        } else {
+          for (const rLine of rawLines) {
+            if (!rLine || ctx.measureText(rLine).width <= maxLineW) {
+              lines.push(rLine);
+            } else {
+              const words = rLine.split(' ');
+              let currLine = '';
+              for (const w of words) {
+                const testLine = currLine ? `${currLine} ${w}` : w;
+                if (currLine && ctx.measureText(testLine).width > maxLineW) {
+                  lines.push(currLine);
+                  currLine = w;
+                } else {
+                  currLine = testLine;
+                }
+              }
+              if (currLine) lines.push(currLine);
+            }
+          }
+        }
+
+        const totalTextH = lines.length * lineHeight;
+        let startY = canvasY + (bounds.height - totalTextH) * 0.5 + lineHeight * 0.5;
+        if (ctrl.verticalAlignment === 0) { // Top
+          startY = canvasY + 4 + lineHeight * 0.5;
+        } else if (ctrl.verticalAlignment === 2) { // Bottom
+          startY = canvasY + bounds.height - 4 - totalTextH + lineHeight * 0.5;
+        }
+        ctx.textBaseline = 'middle';
+
+        for (let li = 0; li < lines.length; li++) {
+          const ly = startY + li * lineHeight;
+          if (ctrl.enableOutline && ctrl.outlineColor) {
+            const oc = ctrl.outlineColor;
+            ctx.strokeStyle = `rgba(${oc.r}, ${oc.g}, ${oc.b}, ${(oc.a ?? 200) / 255})`;
+            ctx.lineWidth = 2.2;
+            ctx.strokeText(lines[li], textX, ly);
+          }
+          ctx.fillText(lines[li], textX, ly);
+        }
+      } else {
+        let textY = canvasY + bounds.height / 2;
+        if (ctrl.verticalAlignment === 0) { // Top
+          ctx.textBaseline = 'top';
+          textY = canvasY + 4;
+        } else if (ctrl.verticalAlignment === 2) { // Bottom
+          ctx.textBaseline = 'bottom';
+          textY = canvasY + bounds.height - 4;
+        } else {
+          ctx.textBaseline = 'middle';
+        }
+
+        // Rich text segment parser for <color=#...>, <size=21>, <b>, <i>
+        const segments = [];
+        const colorStack = [defaultFillStyle];
+        const sizeStack = [fontSize];
+        let boldDepth = 0;
+        let italicDepth = 0;
+        const tagRegex = /<(\/?)(b|i|color|size)(?:=([^>]*))?>/gi;
+        let lastIdx = 0;
+        let match;
+        while ((match = tagRegex.exec(rawText)) !== null) {
+          if (match.index > lastIdx) {
+            segments.push({
+              text: rawText.slice(lastIdx, match.index),
+              color: colorStack[colorStack.length - 1],
+              size: sizeStack[sizeStack.length - 1],
+              bold: boldDepth > 0,
+              italic: italicDepth > 0
+            });
+          }
+          const isClose = match[1] === '/';
+          const tag = match[2].toLowerCase();
+          const val = match[3];
+          if (!isClose) {
+            if (tag === 'b') boldDepth++;
+            else if (tag === 'i') italicDepth++;
+            else if (tag === 'color' && val) colorStack.push(val.trim());
+            else if (tag === 'size' && val) {
+              const parsedSz = Math.max(6, Math.min(160, (parseFloat(val) || baseFontSize) * scaleFactor));
+              sizeStack.push(parsedSz);
+            }
+          } else {
+            if (tag === 'b') boldDepth = Math.max(0, boldDepth - 1);
+            else if (tag === 'i') italicDepth = Math.max(0, italicDepth - 1);
+            else if (tag === 'color' && colorStack.length > 1) colorStack.pop();
+            else if (tag === 'size' && sizeStack.length > 1) sizeStack.pop();
+          }
+          lastIdx = tagRegex.lastIndex;
+        }
+        if (lastIdx < rawText.length) {
+          segments.push({
+            text: rawText.slice(lastIdx),
+            color: colorStack[colorStack.length - 1],
+            size: sizeStack[sizeStack.length - 1],
+            bold: boldDepth > 0,
+            italic: italicDepth > 0
+          });
+        }
+
+        ctx.textAlign = 'left';
+        let totalW = 0;
+        for (const seg of segments) {
+          const stylePrefix = `${seg.italic ? 'italic ' : ''}${seg.bold ? 'bold ' : ''}`;
+          seg.font = `${stylePrefix}${seg.size}px "JetBrains Mono", "Segoe UI Symbol", "Apple Color Emoji", sans-serif`;
+          ctx.font = seg.font;
+          seg.width = ctx.measureText(seg.text).width;
+          totalW += seg.width;
+        }
+
+        let cursorX = bounds.left + 4;
+        if (ctrl.horizontalAlignment === 1) {
+          cursorX = bounds.left + (bounds.width - totalW) * 0.5;
+        } else if (ctrl.horizontalAlignment === 2) {
+          cursorX = bounds.right - 4 - totalW;
+        }
+
+        for (const seg of segments) {
+          ctx.font = seg.font;
+          if (ctrl.enableOutline && ctrl.outlineColor) {
+            const oc = ctrl.outlineColor;
+            ctx.strokeStyle = `rgba(${oc.r}, ${oc.g}, ${oc.b}, ${(oc.a ?? 200) / 255})`;
+            ctx.lineWidth = 2.2;
+            ctx.strokeText(seg.text, cursorX, textY);
+          }
+          ctx.fillStyle = seg.color;
+          ctx.fillText(seg.text, cursorX, textY);
+          cursorX += seg.width;
+        }
+      }
+      ctx.restore();
+    }
+
+    // 3. Draw Vertical Scrollbar for ClientUITextWindowControl when showScrollBar is enabled ([img-5], [img-6])
+    if (ctrl.className === 'ClientUITextWindowControl' && ctrl.showScrollBar !== false) {
+      ctx.save();
+      const sbW = 5;
+      const sbX = bounds.right - sbW - 4;
+      const sbTop = canvasY + 11;
+      const sbH = Math.max(10, bounds.height - 22);
+      // Up / Down arrows
+      ctx.fillStyle = 'rgba(210, 215, 220, 0.5)';
+      ctx.font = '7px sans-serif';
+      ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
-      const textY = canvasY + bounds.height / 2;
-
-      ctx.fillText(ctrl.text, textX, textY);
+      ctx.fillText('▲', sbX + sbW * 0.5, canvasY + 6);
+      ctx.fillText('▼', sbX + sbW * 0.5, canvasY + bounds.height - 6);
+      // Track
+      ctx.fillStyle = 'rgba(15, 18, 22, 0.58)';
+      ctx.fillRect(sbX, sbTop, sbW, sbH);
+      // Thumb
+      const thumbH = Math.max(8, sbH * 0.52);
+      ctx.fillStyle = '#dce1e7';
+      ctx.fillRect(sbX + 0.5, sbTop + 2, sbW - 1, thumbH);
       ctx.restore();
     }
 
     // Render children in order, passing precomputed parent bounds to avoid O(N * depth) recalculation
-    if (ctrl.children && ctrl.children.length > 0) {
-      for (const child of ctrl.children) {
-        this.renderControlNode(child, bounds);
+    const children = ctrl.children;
+    if (children && children.length > 0) {
+      if (this.hasMountedScripts) {
+        // In Interface Layout Editor (layered ordering), bottom of list (len - 1) is drawn first (in back)
+        // and top of list (index 0) is drawn last (on top)!
+        for (let i = children.length - 1; i >= 0; i--) {
+          const child = children[i];
+          if (child.visible && child.alive) {
+            this.renderControlNode(child, bounds);
+          }
+        }
+      } else {
+        for (let i = 0, len = children.length; i < len; i++) {
+          const child = children[i];
+          if (child.visible && child.alive) {
+            this.renderControlNode(child, bounds);
+          }
+        }
       }
     }
 
-    if (rotZ !== 0) {
+    if (hasTransform) {
       ctx.restore();
     }
   }
