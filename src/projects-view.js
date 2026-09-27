@@ -51,10 +51,12 @@ export function destroyInlineProjectSimulator() {
 
 const SEARCH_SVG_ICON = `<svg viewBox="0 -2 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>`;
 
+const formatControlClassLabel = (className) => String(className || '').replace(/^ClientUI/, '');
+
 const UI_CONTROL_PRESET_TYPES = [
   {
     typeKey: 'BaseControl',
-    label: '+ ClientUIBaseControl',
+    label: '+ BaseControl',
     icon: '◇',
     baseName: 'BaseControl',
     className: 'ClientUIBaseControl',
@@ -66,7 +68,7 @@ const UI_CONTROL_PRESET_TYPES = [
   },
   {
     typeKey: 'ImageControl',
-    label: '+ ClientUIImageControl',
+    label: '+ ImageControl',
     icon: '▣',
     baseName: 'ImageControl',
     className: 'ClientUIImageControl',
@@ -78,7 +80,7 @@ const UI_CONTROL_PRESET_TYPES = [
   },
   {
     typeKey: 'TextBoxControl',
-    label: '+ ClientUITextBoxControl',
+    label: '+ TextBoxControl',
     icon: 'T',
     baseName: 'TextBoxControl',
     className: 'ClientUITextBoxControl',
@@ -93,7 +95,7 @@ const UI_CONTROL_PRESET_TYPES = [
   },
   {
     typeKey: 'TextWindowControl',
-    label: '+ ClientUITextWindowControl',
+    label: '+ TextWindowControl',
     icon: '▤',
     baseName: 'TextWindowControl',
     className: 'ClientUITextWindowControl',
@@ -112,7 +114,7 @@ const UI_CONTROL_PRESET_TYPES = [
   },
   {
     typeKey: 'PresetButton',
-    label: '+ ClientUIPresetButtonControl',
+    label: '+ PresetButtonControl',
     icon: 'Btn',
     baseName: 'PresetButton',
     className: 'ClientUIPresetButtonControl',
@@ -125,7 +127,7 @@ const UI_CONTROL_PRESET_TYPES = [
   },
   {
     typeKey: 'GridScrollerControl',
-    label: '+ ClientUIGridScrollerControl',
+    label: '+ GridScrollerControl',
     icon: '⊞',
     baseName: 'GridScrollerControl',
     className: 'ClientUIGridScrollerControl',
@@ -152,7 +154,7 @@ const UI_CONTROL_PRESET_TYPES = [
   },
   {
     typeKey: 'ContainerControl',
-    label: '+ ClientUIContainerControl',
+    label: '+ ContainerControl',
     icon: '□',
     baseName: 'ContainerControl',
     className: 'ClientUIContainerControl',
@@ -168,7 +170,7 @@ const UI_CONTROL_PRESET_TYPES = [
   },
   {
     typeKey: 'CursorEventArea',
-    label: '+ ClientUICursorEventAreaControl',
+    label: '+ CursorEventAreaControl',
     icon: '⌖',
     baseName: 'CursorEventArea',
     className: 'ClientUICursorEventAreaControl',
@@ -181,9 +183,9 @@ const UI_CONTROL_PRESET_TYPES = [
   },
   {
     typeKey: 'AnimationControl',
-    label: '+ ClientUIAnimationControl',
+    label: '+ UIAnimationControl',
     icon: '✦',
-    baseName: 'AnimationControl',
+    baseName: 'UIAnimationControl',
     className: 'ClientUIAnimationControl',
     prefabIndex: 1073741857,
     width: 140,
@@ -195,7 +197,7 @@ const UI_CONTROL_PRESET_TYPES = [
   },
   {
     typeKey: 'FullscreenAnimationControl',
-    label: '+ ClientUIFullscreenAnimationControl',
+    label: '+ FullscreenAnimationControl',
     icon: '⛶',
     baseName: 'FullscreenAnimationControl',
     className: 'ClientUIFullscreenAnimationControl',
@@ -208,7 +210,7 @@ const UI_CONTROL_PRESET_TYPES = [
   },
   {
     typeKey: 'KeyHintControl',
-    label: '+ ClientUIKeyHintControl',
+    label: '+ KeyHintControl',
     icon: '1',
     baseName: 'KeyHintControl',
     className: 'ClientUIKeyHintControl',
@@ -227,7 +229,7 @@ const UI_CONTROL_PRESET_TYPES = [
   },
   {
     typeKey: 'ReferenceControl',
-    label: '+ ClientUIReferenceControl',
+    label: '+ ReferenceControl',
     icon: '🔗',
     baseName: 'ReferenceControl',
     className: 'ClientUIReferenceControl',
@@ -1961,7 +1963,7 @@ export function renderProjectsView(container, onOpenInScratchpad = null) {
             <strong style="color: var(--text-bright); font-size: 13px;">📜 ${escapeHtml(script.filename || (script.path + '.lua'))}</strong>
             <span style="font-size: 11px; color: var(--text-muted); margin-left: 10px;">
               → <strong style="color: var(--accent-gold);">${escapeHtml(luaNode.uiPath || luaNode.name)}</strong>
-              (<code>id:${luaNode.id}</code>, <code>${luaNode.className}:${luaNode.userdataHandle}</code>)
+              (<code>id:${luaNode.id}</code>, <code>${formatControlClassLabel(luaNode.className)}:${luaNode.userdataHandle}</code>)
             </span>
           </div>
           <div style="display: flex; gap: 6px; align-items: center;">
@@ -2000,7 +2002,7 @@ export function renderProjectsView(container, onOpenInScratchpad = null) {
           <span>Index <strong>${selectedNode.prefabIndex}</strong></span>
           <button class="mw-copy-index-btn" data-copy="${selectedNode.prefabIndex}" title="Copy PrefabIndex">📋</button>
           <span class="mw-inspector-id-tag" title="Persistent Control ID (unchanged when reordering)">id: ${selectedNode.id}</span>
-          <span class="mw-inspector-id-tag" title="tostring(script.object) Userdata Handle">${selectedNode.className}:${selectedNode.userdataHandle}</span>
+          <span class="mw-inspector-id-tag" title="Control Type & Handle">${formatControlClassLabel(selectedNode.className)}:${selectedNode.userdataHandle}</span>
         </div>
 
         <!-- [ Basic | Script ] Pill Switcher ([img-2]) -->

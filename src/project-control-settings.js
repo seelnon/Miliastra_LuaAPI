@@ -1792,12 +1792,13 @@ function renderButtonInspectorCardHTML(project, node, state) {
                     ${isCurrentPreview ? `<span class="mw-btn-active-tag">● ACTIVE</span>` : ''}
                   </div>
                   <div class="mw-ref-template-box ${isSideOpen ? 'active' : ''}">
-                    <button type="button" class="mw-ref-template-main" data-open-btn-slot-picker="${slot.stateKey}" data-btn-slot-prop="${slot.prop}" title="Click to open Child Status Node Selector next to Right Menu ">
+                    <button type="button" class="mw-ref-template-main" data-open-btn-slot-picker="${slot.stateKey}" data-btn-slot-prop="${slot.prop}" title="Click to open Child Status Node Selector next to Right Menu">
                       <span class="mw-ref-template-icon" style="width:24px;height:24px;font-size:10px;">${assignedChild ? escapeHtml(assignedChild.icon) : '＋'}</span>
                       <div class="mw-ref-template-meta">
                         <div class="mw-ref-template-name">${assignedChild ? escapeHtml(assignedChild.name) : 'Please Select Control'}</div>
                         <div class="mw-ref-template-idx">${assignedChild ? `id:${assignedChild.id} • ${subCount} child${subCount === 1 ? '' : 'ren'}` : 'None (Unassigned)'}</div>
                       </div>
+                      <span class="mw-side-open-chevron" title="Opens Side Selector">${isSideOpen ? '▸' : '◂'}</span>
                     </button>
                     <div class="mw-ref-template-actions">
                       <button type="button" class="mw-mirror-btn mw-btn-jump-child" data-jump-child-key="${escapeHtml(currentKey)}" ${!assignedChild ? 'disabled' : ''} title="${assignedChild ? `Select ${assignedChild.name} in Hierarchy to edit its visuals` : 'No child node assigned'}">
@@ -2014,6 +2015,7 @@ function renderAnimationInspectorCardHTML(node, state) {
                     <div class="mw-vfx-meta-name">${escapeHtml(currentVfx.name)}</div>
                     <div class="mw-vfx-meta-sub">Index ${currentVfx.id} • <span style="color:${currentVfx.color};">${currentVfx.looping ? (isFull ? 'Looping Bokeh' : 'Looping Particles') : (isFull ? 'Non-Looping Glitch' : 'One-Shot Particle Burst')}</span></div>
                   </div>
+                  <span class="mw-side-open-chevron" title="Opens Select VFX Menu">${pickerOpen ? '▸' : '◂'}</span>
                 </button>
                 <div class="mw-vfx-selected-actions">
                   <button type="button" class="mw-mirror-btn" id="mw-vfx-copy-id-btn" data-copy-vfx="${currentVfx.id}" title="Copy Animation Index ${currentVfx.id}">📋</button>
@@ -2100,6 +2102,7 @@ function renderReferenceControlInspectorCardHTML(node, state) {
                   <div class="mw-ref-template-name">${escapeHtml(currentTpl.name)}</div>
                   <div class="mw-ref-template-idx">${currentTpl.index ? `Index ${currentTpl.index}` : 'No Template Selected'}</div>
                 </div>
+                <span class="mw-side-open-chevron" title="Opens Template List">${listOpen ? '▸' : '◂'}</span>
               </button>
               <div class="mw-ref-template-actions">
                 <button type="button" class="mw-mirror-btn" id="mw-ref-copy-idx-btn" data-copy-ref="${currentTpl.index}" title="Copy Prefab Index ${currentTpl.index}">📋</button>
@@ -2402,6 +2405,7 @@ function renderGridScrollerInspectorCardHTML(node, state) {
                     <div class="mw-ref-template-name">${escapeHtml(currentTpl.name)}</div>
                     <div class="mw-ref-template-idx">${currentTpl.index ? `Index ${currentTpl.index} • ${m.itemCount} Copies` : '+ Click to Insert Template'}</div>
                   </div>
+                  <span class="mw-side-open-chevron" title="Opens Template List">${listOpen ? '▸' : '◂'}</span>
                 </button>
                 <div class="mw-ref-template-actions">
                   <button type="button" class="mw-mirror-btn" id="mw-gs-copy-tpl-btn" title="Copy itemPrefabIndex ${currentTpl.index}">📋</button>
@@ -2566,6 +2570,7 @@ export function renderSideSelectorPanelHTML(project, selectedNode, state) {
     const isFull = selectedNode.className === 'ClientUIFullscreenAnimationControl';
     const allPresets = isFull ? FULLSCREEN_VFX_PRESETS : UI_ANIM_VFX_PRESETS;
     const catFilter = state.vfxCategoryFilter || 'all'; // 'all' | 'looping' | 'nonlooping'
+    const currentVfx = getVfxPresetMeta(selectedNode.animationId, selectedNode.className);
 
     const filtered = allPresets.filter(item => {
       if (catFilter === 'looping' && !item.looping) return false;
@@ -2587,14 +2592,17 @@ export function renderSideSelectorPanelHTML(project, selectedNode, state) {
       const isSel = Number(selectedNode.animationId) === item.id;
       return `
         <div class="mw-side-selector-row ${isSel ? 'selected' : ''}" data-side-pick-vfx="${item.id}" title="${escapeHtml(item.desc)} (Index ${item.id})">
-          <span class="mw-vfx-thumb" style="width:24px;height:24px;font-size:11px;border-color:${item.color};background:${item.looping ? `radial-gradient(circle, rgba(16,13,10,0.2) 30%, ${item.color}88 100%)` : `repeating-linear-gradient(45deg, ${item.color}55 0 3px, #14110e 3px 6px)`};">
+          <span class="mw-vfx-thumb mw-side-choice-thumb" style="border-color:${item.color};background:${item.looping ? `radial-gradient(circle, rgba(16,13,10,0.2) 25%, ${item.color}88 100%)` : `repeating-linear-gradient(45deg, ${item.color}55 0 3px, #14110e 3px 6px)`};">
             ${isFull ? (item.looping ? '⛶' : '⚡') : (item.looping ? '✦' : '💥')}
           </span>
           <div class="mw-side-selector-row-meta">
             <div class="mw-side-selector-row-name">${escapeHtml(item.name)}</div>
-            <div class="mw-side-selector-row-sub">Index ${item.id}</div>
+            <div class="mw-side-selector-row-sub">Index <strong>${item.id}</strong></div>
           </div>
-          <span class="mw-vfx-badge ${item.looping ? 'is-loop' : 'is-once'}">${item.looping ? 'LOOP' : '1-SHOT'}</span>
+          <div class="mw-side-row-right">
+            <span class="mw-vfx-badge ${item.looping ? 'is-loop' : 'is-once'}">${item.looping ? 'LOOP' : '1-SHOT'}</span>
+            ${isSel ? `<span class="mw-side-choice-check" title="Currently Selected">✓</span>` : ''}
+          </div>
         </div>
       `;
     };
@@ -2602,13 +2610,18 @@ export function renderSideSelectorPanelHTML(project, selectedNode, state) {
     return `
       <aside class="mw-side-selector-panel" id="mw-side-selector-panel">
         <div class="mw-side-selector-header">
-          <span class="mw-side-selector-title">Select VFX</span>
+          <div class="mw-side-selector-title-group">
+            <span class="mw-side-selector-hdr-icon">${isFull ? '⛶' : '✦'}</span>
+            <span class="mw-side-selector-title">Select VFX</span>
+            <span class="mw-side-selector-count-pill">${filtered.length}/${allPresets.length}</span>
+          </div>
           <button type="button" class="mw-side-selector-close" id="mw-side-selector-close-btn" title="Close Select VFX">✕</button>
         </div>
 
         <div class="mw-side-selector-search-wrap">
           <span class="mw-side-selector-search-icon">🔍</span>
-          <input type="text" id="mw-side-selector-search-inp" placeholder="Search" value="${escapeHtml(state.sideSelectorSearch || '')}" autocomplete="off" spellcheck="false" />
+          <input type="text" id="mw-side-selector-search-inp" placeholder="Search VFX name or ID..." value="${escapeHtml(state.sideSelectorSearch || '')}" autocomplete="off" spellcheck="false" />
+          ${query ? `<button type="button" class="mw-side-search-clear" id="mw-side-search-clear-btn" title="Clear Search">✕</button>` : ''}
         </div>
 
         <div class="mw-side-selector-tabs">
@@ -2619,16 +2632,29 @@ export function renderSideSelectorPanelHTML(project, selectedNode, state) {
 
         <div class="mw-side-selector-list" id="mw-side-selector-list">
           ${loopItems.length > 0 ? `
-            <div class="mw-side-selector-group-hdr">▾ Looping Effects (${loopItems.length})</div>
+            <div class="mw-side-selector-group-hdr">
+              <span>▾ Looping Effects</span>
+              <span class="mw-side-group-count">${loopItems.length}</span>
+            </div>
             ${loopItems.map(renderVfxRow).join('')}
           ` : ''}
           ${nonLoopItems.length > 0 ? `
-            <div class="mw-side-selector-group-hdr">▾ Non-Looping Effects (${nonLoopItems.length})</div>
+            <div class="mw-side-selector-group-hdr">
+              <span>▾ Non-Looping Effects</span>
+              <span class="mw-side-group-count">${nonLoopItems.length}</span>
+            </div>
             ${nonLoopItems.map(renderVfxRow).join('')}
           ` : ''}
           ${filtered.length === 0 ? `
-            <div class="mw-side-selector-empty">No matching VFX IDs found.</div>
+            <div class="mw-side-selector-empty">No matching VFX IDs found for "${escapeHtml(state.sideSelectorSearch || '')}".</div>
           ` : ''}
+        </div>
+
+        <div class="mw-side-selector-footer">
+          <span class="mw-side-footer-status">
+            ${currentVfx.id ? `Active: <strong>${currentVfx.id}</strong> (${currentVfx.looping ? 'Loop' : '1-Shot'})` : 'No VFX Selected'}
+          </span>
+          ${currentVfx.id ? `<button type="button" class="mw-side-footer-btn" id="mw-side-clear-vfx-btn" title="Unassign VFX">Clear</button>` : ''}
         </div>
       </aside>
     `;
@@ -2640,14 +2666,15 @@ export function renderSideSelectorPanelHTML(project, selectedNode, state) {
   if (mode === 'button_state') {
     const slotKey = state.sideSelectorBtnSlot || 'normal';
     const slotMap = {
-      normal: { prop: 'normalStatusNodeKey', title: 'Select Normal Status Node' },
-      hover: { prop: 'hoverStatusNodeKey', title: 'Select Hover Status Node' },
-      pressed: { prop: 'pressedStatusNodeKey', title: 'Select Pressed Status Node' },
-      disabled: { prop: 'disabledStatusNodeKey', title: 'Select Disabled Status Node' }
+      normal: { prop: 'normalStatusNodeKey', title: 'Select Normal Status Node', short: 'Normal' },
+      hover: { prop: 'hoverStatusNodeKey', title: 'Select Hover Status Node', short: 'Hover' },
+      pressed: { prop: 'pressedStatusNodeKey', title: 'Select Pressed Status Node', short: 'Pressed' },
+      disabled: { prop: 'disabledStatusNodeKey', title: 'Select Disabled Status Node', short: 'Disabled' }
     };
     const slotMeta = slotMap[slotKey] || slotMap.normal;
     const currentKey = selectedNode[slotMeta.prop] || '';
     const directChildren = project ? project.nodes.filter(n => n.parentKey === selectedNode.key) : [];
+    const assignedNode = directChildren.find(c => c.key === currentKey);
     const filteredChildren = directChildren.filter(c => {
       if (!query) return true;
       return (
@@ -2660,33 +2687,56 @@ export function renderSideSelectorPanelHTML(project, selectedNode, state) {
     return `
       <aside class="mw-side-selector-panel" id="mw-side-selector-panel">
         <div class="mw-side-selector-header">
-          <span class="mw-side-selector-title">${escapeHtml(slotMeta.title)}</span>
+          <div class="mw-side-selector-title-group">
+            <span class="mw-side-selector-hdr-icon">Btn</span>
+            <span class="mw-side-selector-title">${escapeHtml(slotMeta.title)}</span>
+          </div>
           <button type="button" class="mw-side-selector-close" id="mw-side-selector-close-btn" title="Close Selector">✕</button>
         </div>
 
         <div class="mw-side-selector-search-wrap">
           <span class="mw-side-selector-search-icon">🔍</span>
-          <input type="text" id="mw-side-selector-search-inp" placeholder="Search 1-Tier Child Controls" value="${escapeHtml(state.sideSelectorSearch || '')}" autocomplete="off" spellcheck="false" />
+          <input type="text" id="mw-side-selector-search-inp" placeholder="Search 1-Tier Child Controls..." value="${escapeHtml(state.sideSelectorSearch || '')}" autocomplete="off" spellcheck="false" />
+          ${query ? `<button type="button" class="mw-side-search-clear" id="mw-side-search-clear-btn" title="Clear Search">✕</button>` : ''}
+        </div>
+
+        <div class="mw-side-selector-tabs mw-side-tabs-4">
+          ${['normal', 'hover', 'pressed', 'disabled'].map(st => `
+            <button type="button" class="mw-vfx-filter-tab ${slotKey === st ? 'active' : ''}" data-side-switch-btn-slot="${st}" title="Switch to ${slotMap[st].title}">
+              ${slotMap[st].short}
+            </button>
+          `).join('')}
         </div>
 
         <div class="mw-side-selector-list" id="mw-side-selector-list">
-          <div class="mw-side-selector-group-hdr">▾ 1-Tier Direct Children (${filteredChildren.length})</div>
+          <div class="mw-side-selector-group-hdr">
+            <span>▾ 1-Tier Direct Children</span>
+            <span class="mw-side-group-count">${filteredChildren.length}</span>
+          </div>
           <div class="mw-side-selector-row ${!currentKey ? 'selected' : ''}" data-side-pick-btn-child="" data-side-btn-prop="${slotMeta.prop}" data-side-btn-state="${slotKey}">
-            <span class="mw-ref-template-icon" style="width:22px;height:22px;font-size:10px;">—</span>
+            <span class="mw-ref-template-icon mw-side-choice-thumb">—</span>
             <div class="mw-side-selector-row-meta">
               <div class="mw-side-selector-row-name">None (Unassigned)</div>
               <div class="mw-side-selector-row-sub">Leave ${escapeHtml(slotKey)} slot empty</div>
+            </div>
+            <div class="mw-side-row-right">
+              ${!currentKey ? `<span class="mw-side-choice-check" title="Currently Selected">✓</span>` : ''}
             </div>
           </div>
           ${filteredChildren.map(child => {
             const isSel = child.key === currentKey;
             const subCount = project.nodes.filter(n => n.parentKey === child.key).length;
+            const cleanType = String(child.className || '').replace(/^ClientUI/, '').replace(/Control$/, '');
             return `
               <div class="mw-side-selector-row ${isSel ? 'selected' : ''}" data-side-pick-btn-child="${escapeHtml(child.key)}" data-side-btn-prop="${slotMeta.prop}" data-side-btn-state="${slotKey}">
-                <span class="mw-ref-template-icon" style="width:22px;height:22px;font-size:10px;">${escapeHtml(child.icon)}</span>
+                <span class="mw-ref-template-icon mw-side-choice-thumb">${escapeHtml(child.icon)}</span>
                 <div class="mw-side-selector-row-meta">
                   <div class="mw-side-selector-row-name">${escapeHtml(child.name)}</div>
-                  <div class="mw-side-selector-row-sub">id:${child.id} • ${subCount} child${subCount === 1 ? '' : 'ren'}</div>
+                  <div class="mw-side-selector-row-sub">id:<strong>${child.id}</strong> • ${subCount} child${subCount === 1 ? '' : 'ren'}</div>
+                </div>
+                <div class="mw-side-row-right">
+                  <span class="mw-tpl-badge">${escapeHtml(cleanType || 'Node')}</span>
+                  ${isSel ? `<span class="mw-side-choice-check" title="Currently Assigned">✓</span>` : ''}
                 </div>
               </div>
             `;
@@ -2697,6 +2747,12 @@ export function renderSideSelectorPanelHTML(project, selectedNode, state) {
               Click <strong>[ + ADD 1-TIER CHILD STATUS CONTAINER ]</strong> in the Button card to create one!
             </div>
           ` : ''}
+        </div>
+
+        <div class="mw-side-selector-footer">
+          <span class="mw-side-footer-status">
+            ${assignedNode ? `${slotMeta.short}: <strong>${escapeHtml(assignedNode.name)}</strong>` : `${slotMeta.short}: Unassigned`}
+          </span>
         </div>
       </aside>
     `;
@@ -2709,8 +2765,18 @@ export function renderSideSelectorPanelHTML(project, selectedNode, state) {
   const activeIdx = isGrid
     ? Number(selectedNode.itemPrefabIndex) || 0
     : Number(selectedNode.referencedPrefabIndex) || 0;
+  const currentTplMeta = getReferenceTemplateMeta(activeIdx);
+  const tplFilter = state.tplCategoryFilter || 'all'; // 'all' | 'interactive' | 'visual'
+
+  const isInteractiveTpl = (t) =>
+    t.className.includes('Button') ||
+    t.className.includes('GridScroller') ||
+    t.className.includes('TextWindow') ||
+    t.className.includes('CursorEventArea');
 
   const filteredTemplates = REFERENCE_TEMPLATE_PRESETS.filter(t => {
+    if (tplFilter === 'interactive' && !isInteractiveTpl(t)) return false;
+    if (tplFilter === 'visual' && isInteractiveTpl(t)) return false;
     if (!query) return true;
     return (
       t.name.toLowerCase().includes(query) ||
@@ -2719,28 +2785,50 @@ export function renderSideSelectorPanelHTML(project, selectedNode, state) {
     );
   });
 
+  const interactiveCount = REFERENCE_TEMPLATE_PRESETS.filter(isInteractiveTpl).length;
+  const visualCount = REFERENCE_TEMPLATE_PRESETS.length - interactiveCount;
+
   return `
     <aside class="mw-side-selector-panel" id="mw-side-selector-panel">
       <div class="mw-side-selector-header">
-        <span class="mw-side-selector-title">Client Control Template List</span>
+        <div class="mw-side-selector-title-group">
+          <span class="mw-side-selector-hdr-icon">${isGrid ? '⊞' : '🔗'}</span>
+          <span class="mw-side-selector-title">Client Control Template List</span>
+          <span class="mw-side-selector-count-pill">${filteredTemplates.length}</span>
+        </div>
         <button type="button" class="mw-side-selector-close" id="mw-side-selector-close-btn" title="Close Template List">✕</button>
       </div>
 
       <div class="mw-side-selector-search-wrap">
         <span class="mw-side-selector-search-icon">🔍</span>
-        <input type="text" id="mw-side-selector-search-inp" placeholder="Search" value="${escapeHtml(state.sideSelectorSearch || '')}" autocomplete="off" spellcheck="false" />
+        <input type="text" id="mw-side-selector-search-inp" placeholder="Search template or index..." value="${escapeHtml(state.sideSelectorSearch || '')}" autocomplete="off" spellcheck="false" />
+        ${query ? `<button type="button" class="mw-side-search-clear" id="mw-side-search-clear-btn" title="Clear Search">✕</button>` : ''}
+      </div>
+
+      <div class="mw-side-selector-tabs">
+        <button type="button" class="mw-vfx-filter-tab ${tplFilter === 'all' ? 'active' : ''}" data-side-tpl-filter="all">All (${REFERENCE_TEMPLATE_PRESETS.length})</button>
+        <button type="button" class="mw-vfx-filter-tab ${tplFilter === 'visual' ? 'active' : ''}" data-side-tpl-filter="visual">Visual (${visualCount})</button>
+        <button type="button" class="mw-vfx-filter-tab ${tplFilter === 'interactive' ? 'active' : ''}" data-side-tpl-filter="interactive">Input (${interactiveCount})</button>
       </div>
 
       <div class="mw-side-selector-list" id="mw-side-selector-list">
-        <div class="mw-side-selector-group-hdr">▾ Custom Templates (${filteredTemplates.length})</div>
+        <div class="mw-side-selector-group-hdr">
+          <span>▾ ${isGrid ? 'Grid Content Templates' : 'Control Templates'}</span>
+          <span class="mw-side-group-count">${filteredTemplates.length}</span>
+        </div>
         ${filteredTemplates.map(tpl => {
           const isSel = tpl.index === activeIdx;
+          const shortType = String(tpl.className || '').replace(/^ClientUI/, '').replace(/Control$/, '');
           return `
             <div class="mw-side-selector-row ${isSel ? 'selected' : ''}" data-side-pick-tpl="${tpl.index}" data-side-tpl-target="${isGrid ? 'grid' : 'ref'}" title="${escapeHtml(tpl.desc)} (Index ${tpl.index})">
-              <span class="mw-ref-template-icon" style="width:22px;height:22px;font-size:10px;">${escapeHtml(tpl.icon)}</span>
+              <span class="mw-ref-template-icon mw-side-choice-thumb">${escapeHtml(tpl.icon)}</span>
               <div class="mw-side-selector-row-meta">
                 <div class="mw-side-selector-row-name">${escapeHtml(tpl.name)}</div>
-                <div class="mw-side-selector-row-sub">Index ${tpl.index}</div>
+                <div class="mw-side-selector-row-sub">Index <strong>${tpl.index}</strong></div>
+              </div>
+              <div class="mw-side-row-right">
+                <span class="mw-tpl-badge">${escapeHtml(shortType)}</span>
+                ${isSel ? `<span class="mw-side-choice-check" title="Currently Selected">✓</span>` : ''}
               </div>
             </div>
           `;
@@ -2748,6 +2836,13 @@ export function renderSideSelectorPanelHTML(project, selectedNode, state) {
         ${filteredTemplates.length === 0 ? `
           <div class="mw-side-selector-empty">No matching templates found.</div>
         ` : ''}
+      </div>
+
+      <div class="mw-side-selector-footer">
+        <span class="mw-side-footer-status">
+          ${activeIdx ? `Active: <strong>${escapeHtml(currentTplMeta.name)}</strong>` : 'No Template Selected'}
+        </span>
+        ${activeIdx ? `<button type="button" class="mw-side-footer-btn" id="mw-side-clear-tpl-btn" data-side-tpl-target="${isGrid ? 'grid' : 'ref'}" title="Clear Template">Clear</button>` : ''}
       </div>
     </aside>
   `;
@@ -3012,12 +3107,56 @@ export function bindControlSpecificInspectorEvents({
     });
   }
 
+  const sideClearSearchBtn = container.querySelector('#mw-side-search-clear-btn');
+  if (sideClearSearchBtn) {
+    sideClearSearchBtn.addEventListener('click', () => {
+      state.sideSelectorSearch = '';
+      render();
+      const next = container.querySelector('#mw-side-selector-search-inp');
+      if (next) next.focus();
+    });
+  }
+
   container.querySelectorAll('[data-side-vfx-filter]').forEach(tabBtn => {
     tabBtn.addEventListener('click', () => {
       state.vfxCategoryFilter = tabBtn.dataset.sideVfxFilter || 'all';
       render();
     });
   });
+
+  container.querySelectorAll('[data-side-tpl-filter]').forEach(tabBtn => {
+    tabBtn.addEventListener('click', () => {
+      state.tplCategoryFilter = tabBtn.dataset.sideTplFilter || 'all';
+      render();
+    });
+  });
+
+  container.querySelectorAll('[data-side-switch-btn-slot]').forEach(tabBtn => {
+    tabBtn.addEventListener('click', () => {
+      state.sideSelectorBtnSlot = tabBtn.dataset.sideSwitchBtnSlot || 'normal';
+      render();
+    });
+  });
+
+  const sideClearVfxBtn = container.querySelector('#mw-side-clear-vfx-btn');
+  if (sideClearVfxBtn) {
+    sideClearVfxBtn.addEventListener('click', () => {
+      selectedNode.animationId = 0;
+      render();
+    });
+  }
+
+  const sideClearTplBtn = container.querySelector('#mw-side-clear-tpl-btn');
+  if (sideClearTplBtn) {
+    sideClearTplBtn.addEventListener('click', () => {
+      if (sideClearTplBtn.dataset.sideTplTarget === 'grid') {
+        selectedNode.itemPrefabIndex = 0;
+      } else {
+        selectedNode.referencedPrefabIndex = 0;
+      }
+      render();
+    });
+  }
 
   container.querySelectorAll('[data-side-pick-vfx]').forEach(rowEl => {
     rowEl.addEventListener('click', () => {
