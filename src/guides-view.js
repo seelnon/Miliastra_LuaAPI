@@ -117,30 +117,44 @@ end`;
 
 const GUIDE_SETACTIVE_VS_ENABLED_CODE = `---@meta
 -- ============================================================================
--- WHY script.enabled = false DOES NOT WORK FROM OUTSIDE
+-- 1. WHY script.enabled = false DOES NOT WORK FROM OUTSIDE
 -- Per library/Script.d.lua: "Modifying script.enabled directly has no effect
 -- on lifecycle functions or event handlers."
+--
+-- 2. CRITICAL ENGINE RULE: CHILD CONTROLS VS. ROOT UI CONTROL (GROUP)
+--   • CHILD CONTROLS: Use targetChild:SetActive(bool) and targetChild:SetVisible(bool)
+--     freely inside your UI hierarchy.
+--   • ROOT UI CONTROL (script.object of the parent experience):
+--     NEVER call root:SetActive(false) or root:SetVisible(false) to exit/close!
+--     If Lua sets the root UI Control inactive or invisible, Genshin's Node Graph
+--     ("Set UI Control (Group) Status") CANNOT override it or make it visible again!
+--   • Instead, close the root UI experience by sending a ServerSignal to the
+--     Server Node Graph so the server turns off "UI Control Group Status_Off":
 -- ============================================================================
 
--- ✅ WAY 1: Toggle the UI Control from ANY script using control:SetActive(bool)
--- Calling SetActive(false) triggers OnDisable() on all scripts attached to that
--- control and pauses their updates. Calling SetActive(true) triggers OnEnable()!
-local function SetTargetNodeActive(rootContainer, childName, isActive)
+local EXIT_SIGNAL_NAME = "NORTH_RACER_EXIT" -- Must be manually created in Genshin Node Graph!
+
+function ExitExperience()
+    local root = script.object
+    -- Release cursor and notify the Server Node Graph to turn off the Root UI Control Group:
+    local exitSignal = game.ServerSignal(EXIT_SIGNAL_NAME)
+    if exitSignal then
+        exitSignal:SendSignal()
+    end
+    if root then
+        root.showCursor = false
+    end
+    -- DO NOT call root:SetActive(false) or root:SetVisible(false) here!
+end
+
+-- ✅ For CHILD controls inside your UI, SetActive / SetVisible work normally:
+local function SetChildNodeActive(rootContainer, childName, isActive)
     local targetCtrl = rootContainer:GetChild(childName)
     if targetCtrl then
         targetCtrl:SetActive(isActive)
         targetCtrl:SetVisible(isActive)
     end
-end
-
--- ✅ WAY 2: Pause/Resume OnUpdate(deltaTime) from inside or via :Invoke()
--- Inside the target script (e.g. Image_Control.lua):
-function SetPhysicsPaused(paused)
-    script:EnableUpdate(not paused)
-end
-
--- From the controller script:
--- controllerScript:Invoke("SetPhysicsPaused", true)`;
+end`;
 
 const GUIDE_BUTTON_BG_WORKAROUND_CODE = `---@meta
 -- ============================================================================
@@ -331,12 +345,12 @@ export function renderGuidesView(container, onOpenInScratchpad = null) {
       </div>
 
       <div class="matrix-card" style="cursor: default;">
-        <div class="card-name">4. The script.enabled Trap vs. control:SetActive()</div>
-        <div class="card-val">How to Enable / Disable Scripts from Outside</div>
+        <div class="card-name">4. Child control:SetActive() vs. The Root UI Group Trap</div>
+        <div class="card-val">Never Call SetActive(false) / SetVisible(false) on Root!</div>
         <div class="card-desc">
-          Per <code>library/Script.d.lua</code>, changing <strong><code>script.enabled = false</code></strong> directly has <strong>no effect</strong> on lifecycle functions or event handlers!<br><br>
-          • To disable/enable a control and its script from outside, call <strong><code>targetControl:SetActive(false)</code></strong> / <strong><code>SetActive(true)</code></strong> (which fires <code>OnDisable()</code> / <code>OnEnable()</code>).<br>
-          • To pause <code>OnUpdate</code> from inside, call <strong><code>script:EnableUpdate(false)</code></strong>.
+          Per <code>library/Script.d.lua</code>, changing <strong><code>script.enabled = false</code></strong> directly has <strong>no effect</strong> on lifecycle functions.<br><br>
+          • For <strong>child controls</strong> inside your UI, use <strong><code>childCtrl:SetActive(bool)</code></strong> and <strong><code>childCtrl:SetVisible(bool)</code></strong>.<br>
+          • <strong>CRITICAL:</strong> Never call <code>root:SetActive(false)</code> or <code>root:SetVisible(false)</code> on the <strong>root parent script container</strong>! Doing so locks the root control so Genshin's Node Graph can <strong>never make it visible again</strong>.
         </div>
       </div>
 
@@ -346,6 +360,27 @@ export function renderGuidesView(container, onOpenInScratchpad = null) {
         <div class="card-desc">
           <strong>The Static Text Trap:</strong> If a stage creator writes <code>"Press R to Reload"</code> inside a <code>TextBoxControl</code> because they have <em>Craftsperson Key 7</em> bound to <code>R</code>, any player who remapped that slot to <strong><code>'['</code></strong> in their Game Settings (or plays on a Gamepad) sees a broken prompt that doesn't match their controls!<br><br>
           <strong>The Solution:</strong> Always use <strong><code>ClientUIKeyHintControl</code></strong> (<code>1073741858</code>) for key/button prompts! It queries the player's live keybind table and automatically renders their actual bound keycap (e.g. <code>[</code> instead of <code>R</code>) on PC via <code>Enum.KeyboardKeyCode</code> (59 items) or their Gamepad button via <code>Enum.ControllerKeyCode</code> (25 items), pairing 1:1 with <code>Enum.KeyEventType</code> (164 total events: 116 Keyboard + 48 Controller).
+        </div>
+      </div>
+
+      <div class="matrix-card" style="cursor: default; border-color: #b8c94a;">
+        <div class="card-name">6. Launching & Closing Root UI via Node Graph & ServerSignal</div>
+        <div class="card-val">Set UI Control (Group) Status ↔ game.ServerSignal(name):SendSignal()</div>
+        <div class="card-desc">
+          In Genshin Node Graphs, the <strong>only way</strong> to launch or close a top-level UI parent group is the <strong><code>Set UI Control (Group) Status</code></strong> node (labeled <em>Display Status: UI Control Group Status_On / Off</em> in the UI, which actually controls group activation and triggers <code>OnStart()</code>, but <strong>cannot</strong> override Lua's <code>SetActive</code> / <code>SetVisible</code>!).<br><br>
+          <strong>How to close a UI experience from Lua:</strong><br>
+          1. Set <code>root.showCursor = false</code> and call <code>game.ServerSignal("YOUR_EXIT_SIGNAL"):SendSignal()</code>.<br>
+          2. <strong>Signals are not auto-created:</strong> You must know the exact signal name and manually create a matching Signal in the Genshin Server Node Graph, wired to <strong><code>Set UI Control (Group) Status → UI Control Group Status_Off</code></strong> on your parent UI Control (Group) Index (e.g. <code>1073741845</code>).<br><br>
+          <div style="background: #1a1c20; border: 1px solid #869936; border-radius: 6px; overflow: hidden; font-family: var(--font-mono); font-size: 11px; margin-top: 6px;">
+            <div style="background: #b8c94a; color: #181a14; font-weight: 800; padding: 5px 10px; display: flex; align-items: center; gap: 6px;">
+              <span>⑂</span> <span>Set UI Control (Group) Status</span>
+            </div>
+            <div style="padding: 8px 10px; display: flex; flex-direction: column; gap: 6px; color: #dcd0ba;">
+              <div><span style="color: #6ca0f6;">●</span> <strong>Target Player:</strong> <span style="background: #162234; color: #7cb3ff; padding: 1px 6px; border-radius: 3px; font-size: 10px;">Get Player Entity to Which the Character Belongs - Affiliated Player Entity</span></div>
+              <div><span style="color: #9aa0a6;">○</span> <strong>UI Control (Group) Index:</strong> <code style="background: #252830; padding: 1px 6px; border-radius: 3px; color: #fff;">1073741845</code></div>
+              <div><span style="color: #9aa0a6;">○</span> <strong>Display Status:</strong> <code style="background: #252830; padding: 1px 6px; border-radius: 3px; color: #f5b82e;">UI Control Group Status_On</code> / <code style="background: #252830; padding: 1px 6px; border-radius: 3px; color: #ff8a80;">UI Control Group Status_Off</code></div>
+            </div>
+          </div>
         </div>
       </div>
     </div>
