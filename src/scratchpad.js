@@ -17,12 +17,97 @@ import { getLuaCompletionsAtCursor, renderAutocompleteListHTML } from './lua-aut
 const scratchpadCache = new Map();
 let snippetsLoadPromise = null;
 
+const STORAGE_KEY_USER_DOCS = 'miliastra_scratchpad_user_docs_v1';
+const STORAGE_KEY_ACTIVE_ID = 'miliastra_scratchpad_active_id_v1';
+const STORAGE_KEY_BUILTIN_EDITS = 'miliastra_scratchpad_builtin_edits_v1';
+
+function loadUserDocsFromStorage() {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY_USER_DOCS);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+      .filter(d => d && typeof d.id === 'string' && typeof d.rawName === 'string')
+      .map(d => ({
+        id: d.id,
+        rawName: d.rawName,
+        name: d.name || `💾 ${d.rawName}`,
+        filename: d.filename || `browser_cache/${d.rawName.replace(/\.lua$/i, '')}.lua`,
+        code: typeof d.code === 'string' ? d.code : '',
+        isUserDoc: true,
+        _loaded: true,
+        updatedAt: d.updatedAt || Date.now()
+      }));
+  } catch (e) {
+    console.warn('[Lua Scratchpad] Failed to read user docs from localStorage:', e);
+    return [];
+  }
+}
+
+function saveUserDocsToStorage() {
+  try {
+    const userDocs = SNIPPETS.filter(s => s.isUserDoc).map(s => ({
+      id: s.id,
+      rawName: s.rawName || s.name.replace(/^💾\s*/, ''),
+      name: s.name,
+      filename: s.filename,
+      code: s.code,
+      isUserDoc: true,
+      updatedAt: s.updatedAt || Date.now()
+    }));
+    localStorage.setItem(STORAGE_KEY_USER_DOCS, JSON.stringify(userDocs));
+  } catch (e) {
+    console.warn('[Lua Scratchpad] Failed to save user docs to localStorage:', e);
+  }
+}
+
+function loadBuiltinEditsFromStorage() {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY_BUILTIN_EDITS);
+    return raw ? JSON.parse(raw) || {} : {};
+  } catch {
+    return {};
+  }
+}
+
+function saveBuiltinEditToStorage(snippetId, code) {
+  try {
+    const map = loadBuiltinEditsFromStorage();
+    map[snippetId] = code;
+    localStorage.setItem(STORAGE_KEY_BUILTIN_EDITS, JSON.stringify(map));
+  } catch {}
+}
+
+function getSavedActiveSnippetId() {
+  try {
+    return localStorage.getItem(STORAGE_KEY_ACTIVE_ID) || '';
+  } catch {
+    return '';
+  }
+}
+
+function setSavedActiveSnippetId(id) {
+  try {
+    if (id) {
+      localStorage.setItem(STORAGE_KEY_ACTIVE_ID, id);
+    } else {
+      localStorage.removeItem(STORAGE_KEY_ACTIVE_ID);
+    }
+  } catch {}
+}
+
 /**
  * Fetches a raw .lua file from /lua_scratchpad/ using standard Web APIs
  * (new URL(..., import.meta.url) and fetch()), working seamlessly across
  * GitHub Pages repository subpaths and root domains.
  */
 export async function grabScratchpadFile(fileName) {
+  if (!fileName) return null;
+  if (String(fileName).startsWith('browser_cache/')) {
+    const found = SNIPPETS.find(s => s.filename === fileName);
+    return found ? found.code : null;
+  }
   const cleanName = fileName.replace(/^(\/|lua_scratchpad\/)/, '');
 
   if (scratchpadCache.has(cleanName)) {
@@ -101,12 +186,12 @@ export const snippetDefinitions = [
   },
   {
     id: 'image_control_demo',
-    name: 'ImageControl Bounce & Velocity (Image_Control.lua)',
+    name: 'ImageControl Bounce & Velocity',
     filename: 'lua_scratchpad/Image_Control.lua'
   },
   {
     id: 'button_to_control_image_bounce',
-    name: 'Cross-Script Button Controller (Button_toControl_Image_Bounce.lua)',
+    name: 'Cross-Script Button Controller',
     filename: 'lua_scratchpad/Button_toControl_Image_Bounce.lua'
   }
 ];
@@ -114,21 +199,28 @@ export const snippetDefinitions = [
 export function enrichSnippet(def) {
   const cleanName = def.filename.replace(/^(\/|lua_scratchpad\/)/, '');
   const cached = scratchpadCache.get(cleanName);
+  const builtinEdits = loadBuiltinEditsFromStorage();
+  const savedEdit = builtinEdits[def.id];
   return {
     ...def,
-    code: cached || `-- Loading ${def.filename}...\nfunction OnStart()\n    print("Loading ${def.filename}...")\nend`,
-    _loaded: Boolean(cached)
+    code: savedEdit || cached || `-- Loading ${def.filename}...\nfunction OnStart()\n    print("Loading ${def.filename}...")\nend`,
+    _loaded: Boolean(savedEdit || cached),
+    _hasUserOverride: Boolean(savedEdit)
   };
 }
 
-export const SNIPPETS = snippetDefinitions.map(enrichSnippet);
+export const SNIPPETS = [
+  ...loadUserDocsFromStorage(),
+  ...snippetDefinitions.map(enrichSnippet)
+];
 
 export function getScratchpadSnippets() {
   if (!snippetsLoadPromise) {
     snippetsLoadPromise = Promise.all(
       SNIPPETS.map(async (snip) => {
+        if (snip.isUserDoc) return;
         const fetched = await grabScratchpadFile(snip.filename);
-        if (fetched) {
+        if (fetched && !snip._hasUserOverride) {
           snip.code = fetched;
           snip._loaded = true;
         }
@@ -152,9 +244,25 @@ const SEARCH_SVG_ICON = `<svg viewBox="0 -2 24 24" width="13" height="13" fill="
 let activeScratchpadKeydownHandler = null;
 
 export function renderScratchpad(container, initialCode = '') {
-  const defaultSnippet = SNIPPETS[0];
+  const savedActiveId = getSavedActiveSnippetId();
+  let initialIdx = 0;
+  if (!initialCode && savedActiveId) {
+    const foundIdx = SNIPPETS.findIndex(s => s.id === savedActiveId);
+    if (foundIdx !== -1) {
+      initialIdx = foundIdx;
+    }
+  }
+
+  const defaultSnippet = SNIPPETS[initialIdx] || SNIPPETS[0];
   const defaultCode = initialCode || defaultSnippet.code;
   const initialSourceLabel = initialCode ? 'Custom Script Buffer' : defaultSnippet.filename;
+
+  const renderSelectOptionsHTML = (selectedIndex) => {
+    return `
+      <option value="">Select a template or saved snippet...</option>
+      ${SNIPPETS.map((s, idx) => `<option value="${idx}" ${selectedIndex === idx ? 'selected' : ''}>${escapeHtmlPlain(s.name)}</option>`).join('')}
+    `;
+  };
 
   container.innerHTML = `
     <div class="scratchpad-container scratchpad-full-shell">
@@ -162,15 +270,21 @@ export function renderScratchpad(container, initialCode = '') {
       <div class="scratchpad-toolbar">
         <span style="font-size: 11px; font-weight: 700; color: var(--text-primary);">SNIPPETS:</span>
         <select id="snippet-select" class="brutal-btn" style="padding: 4px 8px; font-size: 11px; background: var(--bg-workspace);">
-          <option value="">Select a template snippet...</option>
-          ${SNIPPETS.map((s, idx) => `<option value="${idx}" ${!initialCode && idx === 0 ? 'selected' : ''}>${s.name}</option>`).join('')}
+          ${renderSelectOptionsHTML(initialCode ? -1 : initialIdx)}
         </select>
-        <button id="scratchpad-sim-btn" class="brutal-btn brutal-btn-gold" title="Launch 60FPS Miliastra Game Simulation">[ ◈ SIMULATE (60 FPS) ]</button>
-        <button id="scratchpad-copy-btn" class="brutal-btn">[ COPY CODE ]</button>
-        <button id="scratchpad-clear-btn" class="brutal-btn">[ CLEAR ]</button>
+        <button id="scratchpad-new-btn" class="brutal-btn" title="Create a new named Lua snippet saved in Browser Cache">+</button>
+        <div id="sp-new-doc-bar" class="sp-new-doc-bar" style="display: none;">
+          <span class="sp-new-doc-label">NAME:</span>
+          <input type="text" id="sp-new-doc-input" class="sp-new-doc-input" placeholder="e.g. my_custom_ui.lua" spellcheck="false" autocomplete="off" />
+          <button type="button" id="sp-new-doc-confirm" class="brutal-btn brutal-btn-gold" style="padding: 2px 8px; font-size: 10.5px;">[ SAVE ]</button>
+          <button type="button" id="sp-new-doc-cancel" class="brutal-btn" style="padding: 2px 6px; font-size: 10.5px;">[ ✕ ]</button>
+        </div>
+        <button id="scratchpad-delete-doc-btn" class="brutal-btn brutal-btn-danger" style="display: ${!initialCode && defaultSnippet && defaultSnippet.isUserDoc ? 'inline-flex' : 'none'};" title="Delete this saved snippet from Browser Cache">[ ✕ DEL ]</button>
+        <button id="scratchpad-sim-btn" class="brutal-btn brutal-btn-gold" title="Launch 60FPS Miliastra Game Simulation">[ ◈ SIMULATE ]</button>
+        <button id="scratchpad-copy-btn" class="brutal-btn">[ COPY ]</button>
         <button id="scratchpad-download-btn" class="brutal-btn">[ EXPORT .LUA ]</button>
-        <button id="scratchpad-find-toggle-btn" class="brutal-btn" title="Find in Script (Ctrl+F / F3)">[ ${SEARCH_SVG_ICON}FIND ]</button>
-        <span class="scratchpad-source-pill" id="scratchpad-source-file">${initialSourceLabel}</span>
+        <button id="scratchpad-find-toggle-btn" class="brutal-btn" title="Find in Script (Ctrl+F / F3)">${SEARCH_SVG_ICON}</button>
+        <span class="scratchpad-source-pill" id="scratchpad-source-file">${escapeHtmlPlain(initialSourceLabel)}</span>
       </div>
 
       <!-- CODE EDITOR + ATTACHED FOOTER -->
@@ -183,7 +297,7 @@ export function renderScratchpad(container, initialCode = '') {
             <!-- Lua Syntax Highlight Layer -->
             <pre class="editor-highlight-layer" id="editor-highlight-layer" aria-hidden="true"><code id="editor-code-output"></code></pre>
             <!-- Interactive Textarea -->
-            <textarea id="scratchpad-textarea" class="editor-interactive-textarea" spellcheck="false" autocomplete="off" autocorrect="off" autocapitalize="off">${defaultCode}</textarea>
+            <textarea id="scratchpad-textarea" class="editor-interactive-textarea" spellcheck="false" autocomplete="off" autocorrect="off" autocapitalize="off">${escapeHtmlPlain(defaultCode)}</textarea>
 
             <!-- NATIVE FIND BAR ([img-2]) -->
             <div id="scratchpad-find-bar" class="sp-find-bar" style="display: none;">
@@ -204,7 +318,7 @@ export function renderScratchpad(container, initialCode = '') {
         <div class="editor-status-footer">
           <div class="editor-footer-left">
             <span class="editor-footer-tag">STATUS & METRICS</span>
-            <span class="editor-footer-hint">Miliastra Lua 5.1 Runtime • <code>lua_scratchpad/</code> • [Ctrl+F / F3] Find • [Ctrl+Space] Suggestions</span>
+            <span class="editor-footer-hint">Miliastra Lua 5.1 Runtime • <code>lua_scratchpad/</code> & Browser Cache • [Ctrl+F / F3] Find • [Ctrl+Space] Suggestions</span>
           </div>
           <div class="editor-footer-right">
             <span id="scratchpad-cursor-pos">Ln 1, Col 1</span>
@@ -228,9 +342,32 @@ export function renderScratchpad(container, initialCode = '') {
   const sourceFileEl = container.querySelector('#scratchpad-source-file');
   const simBtn = container.querySelector('#scratchpad-sim-btn');
   const copyBtn = container.querySelector('#scratchpad-copy-btn');
-  const clearBtn = container.querySelector('#scratchpad-clear-btn');
+  const newBtn = container.querySelector('#scratchpad-new-btn');
+  const newDocBar = container.querySelector('#sp-new-doc-bar');
+  const newDocInput = container.querySelector('#sp-new-doc-input');
+  const newDocConfirmBtn = container.querySelector('#sp-new-doc-confirm');
+  const newDocCancelBtn = container.querySelector('#sp-new-doc-cancel');
+  const deleteDocBtn = container.querySelector('#scratchpad-delete-doc-btn');
   const downloadBtn = container.querySelector('#scratchpad-download-btn');
   const findToggleBtn = container.querySelector('#scratchpad-find-toggle-btn');
+
+  const persistCurrentBufferToCache = () => {
+    const val = select.value;
+    if (val === '') return;
+    const idx = parseInt(val, 10);
+    const activeSnip = SNIPPETS[idx];
+    if (!activeSnip) return;
+
+    activeSnip.code = textarea.value;
+    activeSnip._loaded = true;
+    if (activeSnip.isUserDoc) {
+      activeSnip.updatedAt = Date.now();
+      saveUserDocsToStorage();
+    } else if (activeSnip.id) {
+      activeSnip._hasUserOverride = true;
+      saveBuiltinEditToStorage(activeSnip.id, textarea.value);
+    }
+  };
 
   // Native Find Widget elements
   const findBar = container.querySelector('#scratchpad-find-bar');
@@ -452,6 +589,7 @@ export function renderScratchpad(container, initialCode = '') {
     userEdited = true;
     closeAutocomplete();
     updateEditor();
+    persistCurrentBufferToCache();
     syncScroll();
     textarea.focus();
     return true;
@@ -507,6 +645,7 @@ export function renderScratchpad(container, initialCode = '') {
   textarea.addEventListener('input', () => {
     userEdited = true;
     updateEditor();
+    persistCurrentBufferToCache();
     syncScroll();
     triggerAutocompleteCheck();
   });
@@ -594,6 +733,7 @@ export function renderScratchpad(container, initialCode = '') {
         }
       }
       updateEditor();
+      persistCurrentBufferToCache();
       syncScroll();
     }
   });
@@ -661,7 +801,7 @@ export function renderScratchpad(container, initialCode = '') {
   updateEditor();
 
   // Populate default snippet once static fetch finishes
-  if (!initialCode && !defaultSnippet._loaded) {
+  if (!initialCode && defaultSnippet && !defaultSnippet._loaded) {
     grabScratchpadFile(defaultSnippet.filename).then((fetched) => {
       if (fetched && !userEdited && document.body.contains(textarea)) {
         defaultSnippet.code = fetched;
@@ -680,14 +820,21 @@ export function renderScratchpad(container, initialCode = '') {
       const selectedSnippet = SNIPPETS[idx];
       if (!selectedSnippet) return;
 
+      setSavedActiveSnippetId(selectedSnippet.id);
+
       if (sourceFileEl) {
         sourceFileEl.textContent = selectedSnippet.filename;
       }
+      if (deleteDocBtn) {
+        deleteDocBtn.style.display = selectedSnippet.isUserDoc ? 'inline-flex' : 'none';
+      }
 
-      const freshCode = await grabScratchpadFile(selectedSnippet.filename);
-      if (freshCode) {
-        selectedSnippet.code = freshCode;
-        selectedSnippet._loaded = true;
+      if (!selectedSnippet.isUserDoc && !selectedSnippet._hasUserOverride) {
+        const freshCode = await grabScratchpadFile(selectedSnippet.filename);
+        if (freshCode) {
+          selectedSnippet.code = freshCode;
+          selectedSnippet._loaded = true;
+        }
       }
 
       textarea.value = selectedSnippet.code;
@@ -697,8 +844,138 @@ export function renderScratchpad(container, initialCode = '') {
       textarea.scrollTop = 0;
       syncScroll();
       showToast(`Loaded: ${selectedSnippet.name}`);
+    } else if (deleteDocBtn) {
+      deleteDocBtn.style.display = 'none';
     }
   });
+
+  // --- [ + NEW ] Document Creation & Browser Cache Persistence ---
+  const getNextDefaultDocName = () => {
+    const userCount = SNIPPETS.filter(s => s.isUserDoc).length + 1;
+    return `Custom_Script_${userCount}.lua`;
+  };
+
+  const openNewDocPrompt = () => {
+    if (!newDocBar || !newDocInput) return;
+    newDocBar.style.display = 'flex';
+    newBtn.style.display = 'none';
+    newDocInput.value = getNextDefaultDocName();
+    newDocInput.focus();
+    newDocInput.select();
+  };
+
+  const closeNewDocPrompt = () => {
+    if (!newDocBar) return;
+    newDocBar.style.display = 'none';
+    newBtn.style.display = 'inline-flex';
+  };
+
+  const createNewCachedSnippet = () => {
+    const rawEntered = (newDocInput ? newDocInput.value : '').trim();
+    const cleanTitle = rawEntered || getNextDefaultDocName();
+    const fileSlug = cleanTitle
+      .replace(/\.lua$/i, '')
+      .replace(/[^a-zA-Z0-9_\-. ]/g, '_')
+      .trim() || `Custom_Script_${Date.now()}`;
+    const finalFileName = `${fileSlug}.lua`;
+
+    const starterCode = `---@meta\n-- ============================================================================\n-- SCRIPT: ${cleanTitle}\n-- Saved in Browser Cache (localStorage)\n-- ============================================================================\n\nlocal CONTAINER_TEMPLATE = 1073741852\nlocal IMAGE_TEMPLATE     = 1073741850\nlocal TEXTBOX_TEMPLATE   = 1073741849\nlocal BUTTON_TEMPLATE    = 1073741851\n\nlocal root = nil\n\nfunction OnStart()\n    root = script.object\n    if not root then return end\n\n    print("[${cleanTitle}] OnStart initialized!")\nend\n\nfunction OnUpdate(deltaTime)\n    \nend\n`;
+
+    const newDoc = {
+      id: `user_doc_${Date.now()}_${Math.floor(Math.random() * 1000)}`,
+      rawName: cleanTitle,
+      name: `💾 ${cleanTitle}`,
+      filename: `browser_cache/${finalFileName}`,
+      code: starterCode,
+      isUserDoc: true,
+      _loaded: true,
+      updatedAt: Date.now()
+    };
+
+    // Insert at the top of SNIPPETS so user-created cached documents are immediately accessible
+    SNIPPETS.unshift(newDoc);
+    saveUserDocsToStorage();
+    setSavedActiveSnippetId(newDoc.id);
+
+    // Refresh <select> options and select the newly created snippet (index 0)
+    select.innerHTML = renderSelectOptionsHTML(0);
+    select.value = '0';
+
+    if (sourceFileEl) {
+      sourceFileEl.textContent = newDoc.filename;
+    }
+    if (deleteDocBtn) {
+      deleteDocBtn.style.display = 'inline-flex';
+    }
+
+    closeNewDocPrompt();
+    textarea.value = newDoc.code;
+    userEdited = true;
+    closeAutocomplete();
+    updateEditor();
+    textarea.scrollTop = 0;
+    syncScroll();
+    textarea.focus();
+    showToast(`Created & saved "${cleanTitle}" in browser cache`);
+  };
+
+  if (newBtn) {
+    newBtn.addEventListener('click', openNewDocPrompt);
+  }
+  if (newDocConfirmBtn) {
+    newDocConfirmBtn.addEventListener('click', createNewCachedSnippet);
+  }
+  if (newDocCancelBtn) {
+    newDocCancelBtn.addEventListener('click', () => {
+      closeNewDocPrompt();
+      textarea.focus();
+    });
+  }
+  if (newDocInput) {
+    newDocInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        createNewCachedSnippet();
+      } else if (e.key === 'Escape') {
+        e.preventDefault();
+        closeNewDocPrompt();
+        textarea.focus();
+      }
+    });
+  }
+
+  if (deleteDocBtn) {
+    deleteDocBtn.addEventListener('click', () => {
+      const val = select.value;
+      if (val === '') return;
+      const idx = parseInt(val, 10);
+      const targetSnip = SNIPPETS[idx];
+      if (!targetSnip || !targetSnip.isUserDoc) return;
+
+      const removedName = targetSnip.rawName || targetSnip.name;
+      SNIPPETS.splice(idx, 1);
+      saveUserDocsToStorage();
+
+      const nextIdx = Math.min(idx, SNIPPETS.length - 1);
+      const nextSnip = SNIPPETS[nextIdx];
+      setSavedActiveSnippetId(nextSnip ? nextSnip.id : '');
+
+      select.innerHTML = renderSelectOptionsHTML(nextIdx >= 0 ? nextIdx : -1);
+      if (nextSnip) {
+        select.value = String(nextIdx);
+        textarea.value = nextSnip.code;
+        if (sourceFileEl) sourceFileEl.textContent = nextSnip.filename;
+        deleteDocBtn.style.display = nextSnip.isUserDoc ? 'inline-flex' : 'none';
+      } else {
+        select.value = '';
+        deleteDocBtn.style.display = 'none';
+      }
+      closeAutocomplete();
+      updateEditor();
+      syncScroll();
+      showToast(`Removed "${removedName}" from browser cache`);
+    });
+  }
 
   simBtn.addEventListener('click', () => {
     const selectedIdx = select.value !== '' ? parseInt(select.value, 10) : 0;
@@ -711,29 +988,23 @@ export function renderScratchpad(container, initialCode = '') {
     copyToClipboard(textarea.value, 'Scratchpad Script');
   });
 
-  clearBtn.addEventListener('click', () => {
-    userEdited = true;
-    textarea.value = '---@meta\n\nfunction OnStart()\n    local control = script.object\n    \nend\n';
-    select.value = '';
-    if (sourceFileEl) {
-      sourceFileEl.textContent = 'Custom Script Buffer';
-    }
-    closeAutocomplete();
-    updateEditor();
-    syncScroll();
-    showToast('Scratchpad Cleared');
-  });
-
   downloadBtn.addEventListener('click', () => {
+    const selectedIdx = select.value !== '' ? parseInt(select.value, 10) : -1;
+    const activeSnip = selectedIdx >= 0 ? SNIPPETS[selectedIdx] : null;
+    let exportFileName = 'miliastra_script.lua';
+    if (activeSnip && activeSnip.filename) {
+      const base = activeSnip.filename.split('/').pop() || 'miliastra_script.lua';
+      exportFileName = base.endsWith('.lua') ? base : `${base}.lua`;
+    }
     const blob = new Blob([textarea.value], { type: 'text/plain;charset=utf-8' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = 'miliastra_script.lua';
+    a.download = exportFileName;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
-    showToast('Exported miliastra_script.lua');
+    showToast(`Exported ${exportFileName}`);
   });
 }

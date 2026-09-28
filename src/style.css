@@ -1021,6 +1021,39 @@ html, body {
   padding: 2px 8px;
 }
 
+.sp-new-doc-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--bg-workspace);
+  border: 1px solid var(--border-gold-bright);
+  padding: 3px 8px;
+  box-shadow: 2px 2px 0px rgba(0, 0, 0, 0.65);
+}
+
+.sp-new-doc-label {
+  font-size: 10.5px;
+  font-weight: 700;
+  color: var(--accent-gold);
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+}
+
+.sp-new-doc-input {
+  width: 170px;
+  background: #120f0c;
+  border: 1px solid var(--border-gold);
+  color: var(--text-bright);
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  padding: 3px 7px;
+  outline: none;
+}
+
+.sp-new-doc-input:focus {
+  border-color: var(--border-gold-bright);
+}
+
 .editor-frame-shell {
   display: flex;
   flex-direction: column;
@@ -5686,12 +5719,3 @@ select.brutal-btn:active {
   border-color: #f5b82e !important;
   box-shadow: 0 0 0 1px rgba(245, 184, 46, 0.45);
 }
-
-
-
-
-
-
-
-
-
