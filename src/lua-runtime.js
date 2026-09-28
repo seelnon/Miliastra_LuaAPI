@@ -438,7 +438,7 @@ export class VirtualUIControl {
   }
 
   // Calculate screen bounding box in Canvas coordinates (0,0 is bottom-left)
-  getScreenBounds(canvasWidth, canvasHeight, precomputedParentBounds = null) {
+  getScreenBounds(canvasWidth, canvasHeight, precomputedParentBounds = null, forCanvasRender = false) {
     let parentWidth = canvasWidth;
     let parentHeight = canvasHeight;
     let parentScaleX = 1;
@@ -450,7 +450,7 @@ export class VirtualUIControl {
     let hasParent = false;
 
     if (this.parent && (precomputedParentBounds || this.parent.getScreenBounds)) {
-      const pBounds = precomputedParentBounds || this.parent.getScreenBounds(canvasWidth, canvasHeight);
+      const pBounds = precomputedParentBounds || this.parent.getScreenBounds(canvasWidth, canvasHeight, null, forCanvasRender);
       parentWidth = this.parent.sizeDeltaX || pBounds.width;
       parentHeight = this.parent.sizeDeltaY || pBounds.height;
       parentScaleX = pBounds.worldScaleX !== undefined ? pBounds.worldScaleX : 1;
@@ -480,9 +480,13 @@ export class VirtualUIControl {
       const localX = anchorRelX + this.anchoredPositionX;
       const localY = anchorRelY + this.anchoredPositionY;
 
-      // Scaled by parent's world scale around parent's pivot:
-      pivotScreenX = parentPivotScreenX + localX * parentScaleX;
-      pivotScreenY = parentPivotScreenY + localY * parentScaleY;
+      // When rendering on Canvas2D, ancestor negative scale (mirroring) is already applied
+      // on the Canvas context transform stack around the ancestor's pivot, so we only scale
+      // offsets by the positive magnitude Math.abs(parentScale) to avoid double-flipping.
+      const effParentScaleX = forCanvasRender ? Math.abs(parentScaleX) : parentScaleX;
+      const effParentScaleY = forCanvasRender ? Math.abs(parentScaleY) : parentScaleY;
+      pivotScreenX = parentPivotScreenX + localX * effParentScaleX;
+      pivotScreenY = parentPivotScreenY + localY * effParentScaleY;
     } else {
       pivotScreenX = anchorCenterX * canvasWidth + this.anchoredPositionX;
       pivotScreenY = anchorCenterY * canvasHeight + this.anchoredPositionY;
@@ -561,8 +565,28 @@ export class MiliastraSimulator {
     this.lastClickTime = 0;
     this.lastDownTime = 0;
     this.lastAttackKeyTime = 0;
+    this.lastSentSignal = null;
+    this.onCloseRequest = null;
 
     this.setupDOMEvents();
+  }
+
+  requestCloseFromLua(controlName = 'script.object') {
+    const sigNote = this.lastSentSignal ? ` (after ServerSignal "${this.lastSentSignal}")` : '';
+    this.log(`[SetActive(false)] Deactivated ${controlName}${sigNote} — closing simulation window.`, 'info');
+    this.isRunning = false;
+    if (this.animationFrameId) {
+      cancelAnimationFrame(this.animationFrameId);
+      this.animationFrameId = null;
+    }
+    if (typeof this.onCloseRequest === 'function') {
+      const cb = this.onCloseRequest;
+      this.onCloseRequest = null;
+      const lastSig = this.lastSentSignal;
+      setTimeout(() => {
+        cb(controlName, lastSig);
+      }, 0);
+    }
   }
 
   log(msg, type = 'info') {
@@ -1098,6 +1122,17 @@ export class MiliastraSimulator {
         }
         return 0;
       });
+      regFast('_M_FastSetOutlineCol', (L) => {
+        const ctrl = this.controlsById.get(lua.lua_tointeger(L, 1));
+        if (ctrl) {
+          const r = lua.lua_tonumber(L, 2) || 0;
+          const g = lua.lua_tonumber(L, 3) || 0;
+          const b = lua.lua_tonumber(L, 4) || 0;
+          const a = lua.lua_tonumber(L, 5);
+          ctrl.outlineColor = { r, g, b, a: a !== null && a !== undefined ? a : 255 };
+        }
+        return 0;
+      });
       regFast('_M_FastSetText', (L) => {
         const ctrl = this.controlsById.get(lua.lua_tointeger(L, 1));
         if (ctrl) {
@@ -1139,6 +1174,7 @@ export class MiliastraSimulator {
       local _FastSetImgCol = _M_FastSetImgCol
       local _FastSetBgCol = _M_FastSetBgCol
       local _FastSetFontCol = _M_FastSetFontCol
+      local _FastSetOutlineCol = _M_FastSetOutlineCol
       local _FastSetText = _M_FastSetText
       local _FastSetFontSize = _M_FastSetFontSize
       local _FastGetCanvasSize = _M_FastGetCanvasSize
@@ -1777,6 +1813,9 @@ export class MiliastraSimulator {
               end
             end
           end
+          if not nextActive and (raw == sim.scriptHost or raw == sim.rootControl or not sim.hasMountedScripts) then
+            sim:requestCloseFromLua(tostring(raw.name or "script.object"))
+          end
         end,
         SetImage = function(self, src, resId)
           src = tonumber(src) or 1
@@ -2276,7 +2315,7 @@ export class MiliastraSimulator {
         end,
         outlineColor = function(t, v)
           if type(v) == "table" then
-            t._raw.outlineColor = { r = tonumber(v.r) or 0, g = tonumber(v.g) or 0, b = tonumber(v.b) or 0, a = v.a ~= nil and tonumber(v.a) or 255 }
+            _FastSetOutlineCol(t._id, tonumber(v.r) or 0, tonumber(v.g) or 0, tonumber(v.b) or 0, v.a ~= nil and tonumber(v.a) or 255)
           end
         end,
         enableOutline = function(t, v) t._raw.enableOutline = not not v end,
@@ -2485,6 +2524,7 @@ export class MiliastraSimulator {
           SetSizeDelta = _ControlMethods.SetSizeDelta,
           SetLocalScale = _ControlMethods.SetLocalScale,
           SetLocalRotation = _ControlMethods.SetLocalRotation,
+          SetActive = _ControlMethods.SetActive,
           SetImage = _ControlMethods.SetImage,
           SetVisible = _ControlMethods.SetVisible,
           SetSoftEdgeWidth = _ControlMethods.SetSoftEdgeWidth,
@@ -3148,6 +3188,7 @@ export class MiliastraSimulator {
             Connect = function(self, fn) end,
             Fire = function(self, ...) end,
             SendSignal = function(self)
+              sim.lastSentSignal = tostring(name)
               sim:log("[ServerSignal: " .. tostring(name) .. "] Dispatched with " .. tostring(#params) .. " params", "info")
             end,
             AddBool = function(self, v) table.insert(params, not not v) end,
@@ -4042,29 +4083,25 @@ end`;
     if (!ctrl || !ctrl.visible || !ctrl.alive || ctrl.active === false) return;
 
     const ctx = this.ctx;
-    const bounds = ctrl.getScreenBounds(this.width, this.height, parentBounds);
+    const bounds = ctrl.getScreenBounds(this.width, this.height, parentBounds, true);
     const canvasY = this.height - bounds.top; // Convert bottom-left to top-left for Canvas2D
     const rotZ = ctrl.localRotationZ || 0;
-    const mirrorSignX = (bounds.worldScaleX !== undefined && bounds.worldScaleX < 0) ? -1 : 1;
-    const mirrorSignY = (bounds.worldScaleY !== undefined && bounds.worldScaleY < 0) ? -1 : 1;
+    const mirrorSignX = (ctrl.localScaleX !== undefined && ctrl.localScaleX < 0) ? -1 : 1;
+    const mirrorSignY = (ctrl.localScaleY !== undefined && ctrl.localScaleY < 0) ? -1 : 1;
     const hasTransform = rotZ !== 0 || mirrorSignX < 0 || mirrorSignY < 0;
 
     if (hasTransform) {
       ctx.save();
       const pivotCanvasX = bounds.pivotScreenX !== undefined ? bounds.pivotScreenX : (bounds.left + bounds.width / 2);
       const pivotCanvasY = bounds.pivotScreenY !== undefined ? (this.height - bounds.pivotScreenY) : (canvasY + bounds.height / 2);
+      ctx.translate(pivotCanvasX, pivotCanvasY);
       if (rotZ !== 0) {
-        ctx.translate(pivotCanvasX, pivotCanvasY);
         ctx.rotate((-rotZ * Math.PI) / 180);
-        ctx.translate(-pivotCanvasX, -pivotCanvasY);
       }
       if (mirrorSignX < 0 || mirrorSignY < 0) {
-        const cx = bounds.left + bounds.width / 2;
-        const cy = canvasY + bounds.height / 2;
-        ctx.translate(cx, cy);
         ctx.scale(mirrorSignX, mirrorSignY);
-        ctx.translate(-cx, -cy);
       }
+      ctx.translate(-pivotCanvasX, -pivotCanvasY);
     }
 
     // 1. Draw Background / Shape (with special Keycap / Gamepad badge renderer for ClientUIKeyHintControl)
@@ -4699,7 +4736,7 @@ end`;
       const defaultFillStyle = ctrl._fontColorCss || `rgba(${fCol.r}, ${fCol.g}, ${fCol.b}, ${fCol.a / 255})`;
       ctx.fillStyle = defaultFillStyle;
       const scaleFactor = Math.min(Math.abs(bounds.worldScaleX || 1), Math.abs(bounds.worldScaleY || 1));
-      const rawText = String(ctrl.text);
+      const rawText = String(ctrl.text).replace(/\u265F(?!\uFE0E)/g, '\u265F\uFE0E');
       const hasRichTags = /<\/?(?:b|i|color(?:=[^>]*)?|size(?:=[^>]*)?)>/i.test(rawText);
       const cleanText = hasRichTags ? rawText.replace(/<\/?(?:b|i|color(?:=[^>]*)?|size(?:=[^>]*)?)>/gi, '') : rawText;
 
@@ -4715,7 +4752,7 @@ end`;
       const lineHeight = Math.round(fontSize * 1.2 * 2) * 0.5;
 
       if (!hasRichTags) {
-        ctx.font = `${fontSize}px "JetBrains Mono", "Segoe UI Symbol", "Apple Color Emoji", sans-serif`;
+        ctx.font = `${fontSize}px "JetBrains Mono", "Segoe UI Symbol", "Noto Sans Symbols 2", "Noto Sans Symbols", "DejaVu Sans", "Arial Unicode MS", sans-serif`;
         let textX = bounds.left + 4;
         if (ctrl.horizontalAlignment === 1) { // Middle
           ctx.textAlign = 'center';
@@ -4768,7 +4805,10 @@ end`;
           if (ctrl.enableOutline && ctrl.outlineColor) {
             const oc = ctrl.outlineColor;
             ctx.strokeStyle = `rgba(${oc.r}, ${oc.g}, ${oc.b}, ${(oc.a ?? 200) / 255})`;
-            ctx.lineWidth = 2.2;
+            ctx.lineJoin = 'round';
+            ctx.lineCap = 'round';
+            ctx.miterLimit = 2;
+            ctx.lineWidth = Math.max(2.2, fontSize * 0.085);
             ctx.strokeText(lines[li], textX, ly);
           }
           ctx.fillText(lines[li], textX, ly);

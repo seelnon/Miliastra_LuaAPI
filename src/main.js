@@ -636,12 +636,16 @@ class MiliastraCodexApp {
         <span class="sub-count">${LUA_EXAMPLES.length} EXAMPLES</span>
       </div>
 
-      <div class="matrix-grid">
+      <div class="matrix-grid examples-matrix-grid">
         ${LUA_EXAMPLES.map(ex => `
-          <div class="matrix-card" data-example-id="${ex.id}">
+          <div class="matrix-card example-matrix-card" data-example-id="${ex.id}">
             <div class="card-name">${ex.title}</div>
             <div class="card-val">${ex.filename}</div>
-            <div class="card-desc">${ex.description}</div>
+            ${ex.thumbnail ? `
+              <div class="example-thumb-frame">
+                <img class="example-thumb-img" src="${ex.thumbnail}" alt="${ex.title}" loading="lazy" />
+              </div>
+            ` : `<div class="card-desc">${ex.description}</div>`}
           </div>
         `).join('')}
       </div>

@@ -287,7 +287,11 @@ export function renderExampleDetail(ex) {
         <span class="doc-source-file">${ex.filename}</span>
       </div>
       <div class="doc-title">${ex.title}</div>
-      <div class="doc-subtitle">${ex.description}</div>
+      ${ex.thumbnail ? `
+        <div class="example-detail-thumb-frame">
+          <img class="example-thumb-img" src="${ex.thumbnail}" alt="${ex.title}" loading="lazy" />
+        </div>
+      ` : `<div class="doc-subtitle">${ex.description}</div>`}
       <div style="display: flex; gap: 6px; margin-top: 10px; flex-wrap: wrap;">
         ${ex.tags.map(t => `<span class="inline-rune" style="font-size: 10px;"># ${t}</span>`).join('')}
       </div>

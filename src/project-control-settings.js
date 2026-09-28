@@ -216,6 +216,831 @@ export function pctToAlpha(pct) {
 }
 
 // ============================================================================
+// INTERACTIVE HSV COLOR WHEEL & COLOR PICKER POPOVER
+// Summoned when clicking any color swatch or color wheel button on:
+//   • Text Color (mw-tb-fontcolor)
+//   • Background Color (mw-tb-bgcolor)
+//   • Outline Color (mw-tb-outlinecolor)
+//   • Fill Color (mw-img-fillcolor)
+//   • Rich Text <color=#RRGGBB> tag button
+// Supports:
+//   • Mode 1 ("wheel"): Full 360° Hue+Saturation Color Wheel Disc + Vertical Brightness (Value) Slider
+//   • Mode 2 ("ring"):  Unity/Pro-style Outer Hue Wheel Ring + Inner Saturation/Value (SV) Square
+//   • Opacity (Alpha 0%–100%) gradient slider bar
+//   • Live Hex (#RRGGBB) + R / G / B / A% numeric inputs + Original/New comparison + 16 Quick Swatches
+// ============================================================================
+export function rgbToHsv(r, g, b) {
+  const rn = Math.max(0, Math.min(255, Number(r) || 0)) / 255;
+  const gn = Math.max(0, Math.min(255, Number(g) || 0)) / 255;
+  const bn = Math.max(0, Math.min(255, Number(b) || 0)) / 255;
+
+  const max = Math.max(rn, gn, bn);
+  const min = Math.min(rn, gn, bn);
+  const d = max - min;
+
+  let h = 0;
+  const s = max === 0 ? 0 : d / max;
+  const v = max;
+
+  if (d !== 0) {
+    if (max === rn) {
+      h = ((gn - bn) / d + (gn < bn ? 6 : 0)) * 60;
+    } else if (max === gn) {
+      h = ((bn - rn) / d + 2) * 60;
+    } else {
+      h = ((rn - gn) / d + 4) * 60;
+    }
+  }
+  return { h: Math.max(0, Math.min(360, h)), s, v };
+}
+
+export function hsvToRgb(h, s, v) {
+  const hh = ((Number(h) % 360) + 360) % 360;
+  const ss = Math.max(0, Math.min(1, Number(s) || 0));
+  const vv = Math.max(0, Math.min(1, Number(v) || 0));
+
+  const c = vv * ss;
+  const x = c * (1 - Math.abs(((hh / 60) % 2) - 1));
+  const m = vv - c;
+
+  let r1 = 0, g1 = 0, b1 = 0;
+  if (hh < 60) { r1 = c; g1 = x; b1 = 0; }
+  else if (hh < 120) { r1 = x; g1 = c; b1 = 0; }
+  else if (hh < 180) { r1 = 0; g1 = c; b1 = x; }
+  else if (hh < 240) { r1 = 0; g1 = x; b1 = c; }
+  else if (hh < 300) { r1 = x; g1 = 0; b1 = c; }
+  else { r1 = c; g1 = 0; b1 = x; }
+
+  return {
+    r: Math.round((r1 + m) * 255),
+    g: Math.round((g1 + m) * 255),
+    b: Math.round((b1 + m) * 255)
+  };
+}
+
+const COLOR_PICKER_SWATCHES = [
+  '#FFFFFF', '#FAF0DC', '#F5B82E', '#C8A86B', '#E07A38', '#E04848', '#EC4899', '#A855F7',
+  '#38BDF8', '#5CE1E6', '#4ADE80', '#10B981', '#5C4838', '#2E261D', '#333333', '#000000'
+];
+
+// Cached high-DPI offscreen canvases for 0.05ms 60fps wheel redraws
+let _cachedDiscCanvas = null;
+let _cachedDiscDpr = 0;
+let _cachedRingCanvas = null;
+let _cachedRingDpr = 0;
+
+function getCachedWheelDiscCanvas(radiusPx, dpr) {
+  const size = Math.ceil(radiusPx * 2 * dpr);
+  if (_cachedDiscCanvas && _cachedDiscDpr === dpr && _cachedDiscCanvas.width === size) {
+    return _cachedDiscCanvas;
+  }
+  const off = document.createElement('canvas');
+  off.width = size;
+  off.height = size;
+  const ctx = off.getContext('2d');
+  const img = ctx.createImageData(size, size);
+  const data = img.data;
+  const cx = size * 0.5;
+  const cy = size * 0.5;
+  const rMax = radiusPx * dpr;
+
+  for (let y = 0; y < size; y++) {
+    const dy = y + 0.5 - cy;
+    for (let x = 0; x < size; x++) {
+      const dx = x + 0.5 - cx;
+      const dist = Math.hypot(dx, dy);
+      if (dist > rMax + 1.2) continue;
+      const sat = Math.min(1, dist / rMax);
+      const deg = ((Math.atan2(dy, dx) * 180) / Math.PI + 360) % 360;
+      const rgb = hsvToRgb(deg, sat, 1.0);
+      // Smooth 1px anti-aliased outer edge
+      const edgeAlpha = dist > rMax ? Math.max(0, 1 - (dist - rMax) / 1.2) : 1;
+      const idx = (y * size + x) * 4;
+      data[idx] = rgb.r;
+      data[idx + 1] = rgb.g;
+      data[idx + 2] = rgb.b;
+      data[idx + 3] = Math.round(edgeAlpha * 255);
+    }
+  }
+  ctx.putImageData(img, 0, 0);
+  _cachedDiscCanvas = off;
+  _cachedDiscDpr = dpr;
+  return off;
+}
+
+function getCachedHueRingCanvas(rOuterPx, rInnerPx, dpr) {
+  const size = Math.ceil(rOuterPx * 2 * dpr);
+  if (_cachedRingCanvas && _cachedRingDpr === dpr && _cachedRingCanvas.width === size) {
+    return _cachedRingCanvas;
+  }
+  const off = document.createElement('canvas');
+  off.width = size;
+  off.height = size;
+  const ctx = off.getContext('2d');
+  const img = ctx.createImageData(size, size);
+  const data = img.data;
+  const cx = size * 0.5;
+  const cy = size * 0.5;
+  const rOut = rOuterPx * dpr;
+  const rIn = rInnerPx * dpr;
+
+  for (let y = 0; y < size; y++) {
+    const dy = y + 0.5 - cy;
+    for (let x = 0; x < size; x++) {
+      const dx = x + 0.5 - cx;
+      const dist = Math.hypot(dx, dy);
+      if (dist > rOut + 1.2 || dist < rIn - 1.2) continue;
+      const deg = ((Math.atan2(dy, dx) * 180) / Math.PI + 360) % 360;
+      const rgb = hsvToRgb(deg, 1.0, 1.0);
+      let edgeAlpha = 1;
+      if (dist > rOut) edgeAlpha = Math.max(0, 1 - (dist - rOut) / 1.2);
+      else if (dist < rIn) edgeAlpha = Math.max(0, 1 - (rIn - dist) / 1.2);
+      const idx = (y * size + x) * 4;
+      data[idx] = rgb.r;
+      data[idx + 1] = rgb.g;
+      data[idx + 2] = rgb.b;
+      data[idx + 3] = Math.round(edgeAlpha * 255);
+    }
+  }
+  ctx.putImageData(img, 0, 0);
+  _cachedRingCanvas = off;
+  _cachedRingDpr = dpr;
+  return off;
+}
+
+let _activeColorWheelSession = null;
+
+export function closeColorWheelPopover(runFinalRender = false) {
+  if (!_activeColorWheelSession) return;
+  const sess = _activeColorWheelSession;
+  _activeColorWheelSession = null;
+  if (sess.cleanupListeners) sess.cleanupListeners();
+  if (sess.popoverEl && sess.popoverEl.parentNode) {
+    sess.popoverEl.parentNode.removeChild(sess.popoverEl);
+  }
+  document.querySelectorAll('.mw-color-hex-box.picker-open').forEach(el => {
+    el.classList.remove('picker-open');
+  });
+  if (runFinalRender && typeof sess.onFinalCommit === 'function') {
+    sess.onFinalCommit();
+  }
+}
+
+export function openColorWheelPopover({
+  prefixId,
+  label,
+  anchorEl,
+  getColorObj,
+  onColorChange,
+  onFinalCommit,
+  autoBumpZeroAlpha = true,
+  showAlpha = true
+}) {
+  // Toggle closed if clicking the same trigger while already open
+  if (_activeColorWheelSession && _activeColorWheelSession.prefixId === prefixId) {
+    closeColorWheelPopover(true);
+    return;
+  }
+  closeColorWheelPopover(false);
+
+  const initialCol = getColorObj() || { r: 255, g: 255, b: 255, a: 255 };
+  const origColor = {
+    r: Math.max(0, Math.min(255, Math.round(Number(initialCol.r) ?? 255))),
+    g: Math.max(0, Math.min(255, Math.round(Number(initialCol.g) ?? 255))),
+    b: Math.max(0, Math.min(255, Math.round(Number(initialCol.b) ?? 255))),
+    a: Math.max(0, Math.min(255, Math.round(Number(initialCol.a) ?? 255)))
+  };
+
+  const initHsv = rgbToHsv(origColor.r, origColor.g, origColor.b);
+  let curH = initHsv.h;
+  let curS = initHsv.s;
+  let curV = initHsv.v;
+  let curA = origColor.a;
+  let wheelMode = 'wheel'; // 'wheel' (Full Color Wheel + Value Bar) | 'ring' (Hue Ring + SV Square)
+
+  const hexBox = anchorEl ? anchorEl.closest('.mw-color-hex-box') : null;
+  if (hexBox) hexBox.classList.add('picker-open');
+
+  const popoverEl = document.createElement('div');
+  popoverEl.className = 'mw-color-wheel-popover';
+  popoverEl.id = 'mw-color-wheel-popover';
+
+  const origHex = rgbToHex6(origColor);
+  const origAlphaPct = alphaToPct(origColor, 100);
+
+  popoverEl.innerHTML = `
+    <div class="mw-cw-header" id="mw-cw-drag-header" title="Drag to move Color Wheel">
+      <div class="mw-cw-title-wrap">
+        <span class="mw-cw-title-dot" id="mw-cw-hdr-dot" style="background:#${origHex};"></span>
+        <span class="mw-cw-title-text">${escapeHtml(label || 'Color Picker')}</span>
+      </div>
+      <div class="mw-cw-mode-pills">
+        <button type="button" class="mw-cw-mode-btn active" data-cw-mode="wheel" title="Circular Hue & Saturation Color Wheel + Brightness Bar">◎ Wheel</button>
+        <button type="button" class="mw-cw-mode-btn" data-cw-mode="ring" title="Hue Wheel Ring + Saturation/Value Square">▣ SV Box</button>
+      </div>
+      <button type="button" class="mw-cw-close-btn" id="mw-cw-close-btn" title="Close Color Wheel (Esc)">✕</button>
+    </div>
+
+    <div class="mw-cw-body">
+      <!-- Interactive Canvas: Circular Color Wheel (or Ring+SV Square) + Vertical Brightness Bar -->
+      <div class="mw-cw-canvas-wrap">
+        <canvas id="mw-cw-canvas" width="212" height="164"></canvas>
+        <div class="mw-cw-canvas-labels">
+          <span id="mw-cw-wheel-caption">Hue & Saturation Wheel</span>
+          <span>Value</span>
+        </div>
+      </div>
+
+      ${showAlpha ? `
+        <!-- Opacity / Alpha Gradient Slider -->
+        <div class="mw-cw-alpha-section">
+          <div class="mw-cw-alpha-label-row">
+            <span>Opacity (Alpha)</span>
+            <span id="mw-cw-alpha-readout">${origAlphaPct}% (${curA}/255)</span>
+          </div>
+          <div class="mw-cw-alpha-track" id="mw-cw-alpha-track" title="Drag to adjust Opacity (0% – 100%)">
+            <div class="mw-cw-alpha-gradient" id="mw-cw-alpha-gradient"></div>
+            <div class="mw-cw-alpha-thumb" id="mw-cw-alpha-thumb" style="left:${origAlphaPct}%;"></div>
+          </div>
+        </div>
+      ` : ''}
+
+      <!-- Hex + Current/Original Comparison Row -->
+      <div class="mw-cw-hex-compare-row">
+        <div class="mw-cw-compare-swatches" title="Left: New Color · Right: Original Color (Click Original to revert)">
+          <div class="mw-cw-comp-new">
+            <span id="mw-cw-comp-new-fill" style="background:#${origHex};opacity:${Math.max(0.12, curA / 255)};"></span>
+          </div>
+          <button type="button" class="mw-cw-comp-orig" id="mw-cw-revert-btn" title="Click to revert to #${origHex} (${origAlphaPct}%)">
+            <span style="background:#${origHex};opacity:${Math.max(0.12, origColor.a / 255)};"></span>
+          </button>
+        </div>
+        <div class="mw-cw-hex-input-box">
+          <span class="mw-cw-hash">#</span>
+          <input type="text" id="mw-cw-hex-inp" maxlength="6" value="${origHex}" spellcheck="false" autocomplete="off" />
+        </div>
+        <button type="button" class="mw-cw-copy-btn" id="mw-cw-copy-hex-btn" title="Copy #RRGGBB Hex">📋</button>
+      </div>
+
+      <!-- R / G / B / A% Numeric Inputs -->
+      <div class="mw-cw-rgba-grid">
+        <div class="mw-cw-chan-box">
+          <span class="mw-cw-chan-tag r">R</span>
+          <input type="number" min="0" max="255" step="1" id="mw-cw-r-inp" value="${origColor.r}" />
+        </div>
+        <div class="mw-cw-chan-box">
+          <span class="mw-cw-chan-tag g">G</span>
+          <input type="number" min="0" max="255" step="1" id="mw-cw-g-inp" value="${origColor.g}" />
+        </div>
+        <div class="mw-cw-chan-box">
+          <span class="mw-cw-chan-tag b">B</span>
+          <input type="number" min="0" max="255" step="1" id="mw-cw-b-inp" value="${origColor.b}" />
+        </div>
+        <div class="mw-cw-chan-box">
+          <span class="mw-cw-chan-tag a">A%</span>
+          <input type="number" min="0" max="100" step="1" id="mw-cw-a-inp" value="${origAlphaPct}" ${!showAlpha ? 'disabled' : ''} />
+        </div>
+      </div>
+
+      <!-- 16 Quick Palette Swatches -->
+      <div class="mw-cw-swatches-section">
+        <div class="mw-cw-swatches-title">Quick Palette Swatches</div>
+        <div class="mw-cw-swatches-grid">
+          ${COLOR_PICKER_SWATCHES.map(hex => `
+            <button type="button" class="mw-cw-preset-swatch" data-cw-swatch="${hex.slice(1)}" style="background:${hex};" title="Pick ${hex}"></button>
+          `).join('')}
+        </div>
+      </div>
+    </div>
+  `;
+
+  document.body.appendChild(popoverEl);
+
+  // Position the popover cleanly to the left of the Right Inspector (or near anchorEl, clamped to viewport)
+  const positionPopover = () => {
+    const rect = (hexBox || anchorEl || document.body).getBoundingClientRect();
+    const popW = 248;
+    const popH = showAlpha ? 386 : 340;
+    let left = rect.left - popW - 12;
+    if (left < 12) {
+      left = Math.min(window.innerWidth - popW - 12, rect.right + 10);
+    }
+    if (left < 12) left = 12;
+    let top = rect.top - 36;
+    if (top + popH > window.innerHeight - 12) {
+      top = window.innerHeight - popH - 12;
+    }
+    if (top < 12) top = 12;
+    popoverEl.style.left = `${Math.round(left)}px`;
+    popoverEl.style.top = `${Math.round(top)}px`;
+  };
+  positionPopover();
+
+  const canvas = popoverEl.querySelector('#mw-cw-canvas');
+  const ctx = canvas.getContext('2d');
+  const dpr = Math.max(1, Math.min(2, window.devicePixelRatio || 1));
+  const cssW = 212;
+  const cssH = 164;
+  canvas.width = Math.round(cssW * dpr);
+  canvas.height = Math.round(cssH * dpr);
+  canvas.style.width = `${cssW}px`;
+  canvas.style.height = `${cssH}px`;
+
+  // Geometry constants in CSS pixels
+  const wheelCx = 82;
+  const wheelCy = 82;
+  const wheelRadius = 72;
+  const ringInnerRadius = 54;
+  const svHalf = 35; // 70x70 inner SV square inside ring
+
+  const valBarX = 174;
+  const valBarY = 10;
+  const valBarW = 22;
+  const valBarH = 144;
+
+  const drawCanvas = () => {
+    ctx.save();
+    ctx.scale(dpr, dpr);
+    ctx.clearRect(0, 0, cssW, cssH);
+
+    const curRgb = hsvToRgb(curH, curS, curV);
+    const curHex = `#${rgbToHex6(curRgb)}`;
+
+    if (wheelMode === 'wheel') {
+      // 1A. Full Circular Hue & Saturation Wheel
+      const discCanvas = getCachedWheelDiscCanvas(wheelRadius, dpr);
+      ctx.drawImage(
+        discCanvas,
+        wheelCx - wheelRadius,
+        wheelCy - wheelRadius,
+        wheelRadius * 2,
+        wheelRadius * 2
+      );
+
+      // Apply current Brightness (Value) dimming over the circular wheel
+      if (curV < 0.999) {
+        ctx.save();
+        ctx.beginPath();
+        ctx.arc(wheelCx, wheelCy, wheelRadius, 0, Math.PI * 2);
+        ctx.fillStyle = `rgba(0, 0, 0, ${(1 - curV).toFixed(3)})`;
+        ctx.fill();
+        ctx.restore();
+      }
+
+      // Outer burnished gold / dark ring frame
+      ctx.beginPath();
+      ctx.arc(wheelCx, wheelCy, wheelRadius + 0.5, 0, Math.PI * 2);
+      ctx.strokeStyle = 'rgba(200, 168, 107, 0.65)';
+      ctx.lineWidth = 1.4;
+      ctx.stroke();
+
+      // Target Reticle on the Color Wheel at (curH, curS)
+      const rad = (curH * Math.PI) / 180;
+      const rx = wheelCx + Math.cos(rad) * (curS * wheelRadius);
+      const ry = wheelCy + Math.sin(rad) * (curS * wheelRadius);
+
+      ctx.beginPath();
+      ctx.arc(rx, ry, 6.5, 0, Math.PI * 2);
+      ctx.fillStyle = curHex;
+      ctx.fill();
+      ctx.lineWidth = 2.2;
+      ctx.strokeStyle = '#ffffff';
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.arc(rx, ry, 7.8, 0, Math.PI * 2);
+      ctx.lineWidth = 1.2;
+      ctx.strokeStyle = 'rgba(12, 9, 6, 0.92)';
+      ctx.stroke();
+    } else {
+      // 1B. Unity-style Outer Hue Wheel Ring + Inner SV Square
+      const ringCanvas = getCachedHueRingCanvas(wheelRadius, ringInnerRadius, dpr);
+      ctx.drawImage(
+        ringCanvas,
+        wheelCx - wheelRadius,
+        wheelCy - wheelRadius,
+        wheelRadius * 2,
+        wheelRadius * 2
+      );
+
+      ctx.beginPath();
+      ctx.arc(wheelCx, wheelCy, wheelRadius + 0.5, 0, Math.PI * 2);
+      ctx.strokeStyle = 'rgba(200, 168, 107, 0.6)';
+      ctx.lineWidth = 1.2;
+      ctx.stroke();
+
+      ctx.beginPath();
+      ctx.arc(wheelCx, wheelCy, ringInnerRadius - 0.5, 0, Math.PI * 2);
+      ctx.strokeStyle = 'rgba(18, 14, 10, 0.85)';
+      ctx.lineWidth = 1.2;
+      ctx.stroke();
+
+      // Hue handle on the ring
+      const hueRad = (curH * Math.PI) / 180;
+      const ringMidR = (wheelRadius + ringInnerRadius) * 0.5;
+      const hx = wheelCx + Math.cos(hueRad) * ringMidR;
+      const hy = wheelCy + Math.sin(hueRad) * ringMidR;
+      const pureHueRgb = hsvToRgb(curH, 1, 1);
+      const pureHueHex = `#${rgbToHex6(pureHueRgb)}`;
+
+      ctx.beginPath();
+      ctx.arc(hx, hy, 5.5, 0, Math.PI * 2);
+      ctx.fillStyle = pureHueHex;
+      ctx.fill();
+      ctx.lineWidth = 2;
+      ctx.strokeStyle = '#ffffff';
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.arc(hx, hy, 6.7, 0, Math.PI * 2);
+      ctx.lineWidth = 1.1;
+      ctx.strokeStyle = '#120e0a';
+      ctx.stroke();
+
+      // Inner SV Square
+      const sqX = wheelCx - svHalf;
+      const sqY = wheelCy - svHalf;
+      const sqSize = svHalf * 2;
+
+      ctx.fillStyle = pureHueHex;
+      ctx.fillRect(sqX, sqY, sqSize, sqSize);
+
+      const gradWhite = ctx.createLinearGradient(sqX, sqY, sqX + sqSize, sqY);
+      gradWhite.addColorStop(0, 'rgba(255,255,255,1)');
+      gradWhite.addColorStop(1, 'rgba(255,255,255,0)');
+      ctx.fillStyle = gradWhite;
+      ctx.fillRect(sqX, sqY, sqSize, sqSize);
+
+      const gradBlack = ctx.createLinearGradient(sqX, sqY, sqX, sqY + sqSize);
+      gradBlack.addColorStop(0, 'rgba(0,0,0,0)');
+      gradBlack.addColorStop(1, 'rgba(0,0,0,1)');
+      ctx.fillStyle = gradBlack;
+      ctx.fillRect(sqX, sqY, sqSize, sqSize);
+
+      ctx.strokeStyle = 'rgba(200, 168, 107, 0.55)';
+      ctx.lineWidth = 1;
+      ctx.strokeRect(sqX, sqY, sqSize, sqSize);
+
+      // SV handle inside square
+      const svX = sqX + curS * sqSize;
+      const svY = sqY + (1 - curV) * sqSize;
+      ctx.beginPath();
+      ctx.arc(svX, svY, 5.5, 0, Math.PI * 2);
+      ctx.fillStyle = curHex;
+      ctx.fill();
+      ctx.lineWidth = 2;
+      ctx.strokeStyle = '#ffffff';
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.arc(svX, svY, 6.7, 0, Math.PI * 2);
+      ctx.lineWidth = 1.1;
+      ctx.strokeStyle = '#120e0a';
+      ctx.stroke();
+    }
+
+    // 2. Vertical Brightness (Value) Slider Bar on the right
+    const topBrightRgb = hsvToRgb(curH, curS, 1.0);
+    const valGrad = ctx.createLinearGradient(0, valBarY, 0, valBarY + valBarH);
+    valGrad.addColorStop(0, `rgb(${topBrightRgb.r}, ${topBrightRgb.g}, ${topBrightRgb.b})`);
+    valGrad.addColorStop(1, '#000000');
+
+    ctx.fillStyle = valGrad;
+    ctx.beginPath();
+    ctx.roundRect(valBarX, valBarY, valBarW, valBarH, 3);
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(200, 168, 107, 0.6)';
+    ctx.lineWidth = 1.2;
+    ctx.stroke();
+
+    // Brightness thumb
+    const vy = valBarY + (1 - curV) * valBarH;
+    ctx.fillStyle = curHex;
+    ctx.strokeStyle = '#ffffff';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.roundRect(valBarX - 2.5, Math.max(valBarY - 2, Math.min(valBarY + valBarH - 5, vy - 3.5)), valBarW + 5, 7, 2);
+    ctx.fill();
+    ctx.stroke();
+
+    ctx.restore();
+  };
+
+  const syncPopoverAndTargetUI = (sourceField = '') => {
+    const rgb = hsvToRgb(curH, curS, curV);
+    const nextColor = { r: rgb.r, g: rgb.g, b: rgb.b, a: curA };
+    const hex6 = rgbToHex6(nextColor);
+    const alphaPct = alphaToPct(nextColor, 100);
+
+    drawCanvas();
+
+    const hdrDot = popoverEl.querySelector('#mw-cw-hdr-dot');
+    if (hdrDot) hdrDot.style.background = `#${hex6}`;
+
+    const newFill = popoverEl.querySelector('#mw-cw-comp-new-fill');
+    if (newFill) {
+      newFill.style.background = `#${hex6}`;
+      newFill.style.opacity = String(Math.max(0.12, curA / 255));
+    }
+
+    const alphaGrad = popoverEl.querySelector('#mw-cw-alpha-gradient');
+    if (alphaGrad) {
+      alphaGrad.style.background = `linear-gradient(90deg, rgba(${rgb.r},${rgb.g},${rgb.b},0) 0%, rgba(${rgb.r},${rgb.g},${rgb.b},1) 100%)`;
+    }
+    const alphaThumb = popoverEl.querySelector('#mw-cw-alpha-thumb');
+    if (alphaThumb) {
+      alphaThumb.style.left = `${alphaPct}%`;
+    }
+    const alphaReadout = popoverEl.querySelector('#mw-cw-alpha-readout');
+    if (alphaReadout) {
+      alphaReadout.textContent = `${alphaPct}% (${curA}/255)`;
+    }
+
+    const hexInp = popoverEl.querySelector('#mw-cw-hex-inp');
+    if (hexInp && sourceField !== 'hex' && document.activeElement !== hexInp) {
+      hexInp.value = hex6;
+    }
+    const rInp = popoverEl.querySelector('#mw-cw-r-inp');
+    const gInp = popoverEl.querySelector('#mw-cw-g-inp');
+    const bInp = popoverEl.querySelector('#mw-cw-b-inp');
+    const aInp = popoverEl.querySelector('#mw-cw-a-inp');
+    if (rInp && sourceField !== 'rgb' && document.activeElement !== rInp) rInp.value = String(rgb.r);
+    if (gInp && sourceField !== 'rgb' && document.activeElement !== gInp) gInp.value = String(rgb.g);
+    if (bInp && sourceField !== 'rgb' && document.activeElement !== bInp) bInp.value = String(rgb.b);
+    if (aInp && sourceField !== 'alpha' && document.activeElement !== aInp) aInp.value = String(alphaPct);
+
+    if (typeof onColorChange === 'function') {
+      onColorChange(nextColor, hex6, alphaPct);
+    }
+  };
+
+  drawCanvas();
+  // Initialize alpha gradient background without firing onColorChange yet
+  const initRgb = hsvToRgb(curH, curS, curV);
+  const initAlphaGrad = popoverEl.querySelector('#mw-cw-alpha-gradient');
+  if (initAlphaGrad) {
+    initAlphaGrad.style.background = `linear-gradient(90deg, rgba(${initRgb.r},${initRgb.g},${initRgb.b},0) 0%, rgba(${initRgb.r},${initRgb.g},${initRgb.b},1) 100%)`;
+  }
+
+  // Canvas pointer interaction (Wheel / Ring / SV Square / Value Bar)
+  let activeCanvasZone = null; // 'wheel_disc' | 'hue_ring' | 'sv_square' | 'val_bar'
+
+  const updateFromCanvasEvent = (e) => {
+    const rect = canvas.getBoundingClientRect();
+    const x = (e.clientX - rect.left) * (cssW / Math.max(1, rect.width));
+    const y = (e.clientY - rect.top) * (cssH / Math.max(1, rect.height));
+
+    if (activeCanvasZone === 'val_bar') {
+      curV = Math.max(0, Math.min(1, 1 - (y - valBarY) / valBarH));
+      if (autoBumpZeroAlpha && curA === 0) curA = 255;
+      syncPopoverAndTargetUI('canvas');
+      return;
+    }
+
+    if (activeCanvasZone === 'wheel_disc') {
+      const dx = x - wheelCx;
+      const dy = y - wheelCy;
+      const dist = Math.hypot(dx, dy);
+      curH = ((Math.atan2(dy, dx) * 180) / Math.PI + 360) % 360;
+      curS = Math.max(0, Math.min(1, dist / wheelRadius));
+      // If Value was 0 (pure black), lift it so the chosen color is visible immediately
+      if (curV < 0.08) curV = 1.0;
+      if (autoBumpZeroAlpha && curA === 0) curA = 255;
+      syncPopoverAndTargetUI('canvas');
+      return;
+    }
+
+    if (activeCanvasZone === 'hue_ring') {
+      const dx = x - wheelCx;
+      const dy = y - wheelCy;
+      curH = ((Math.atan2(dy, dx) * 180) / Math.PI + 360) % 360;
+      if (curS < 0.05) curS = 0.85;
+      if (curV < 0.08) curV = 1.0;
+      if (autoBumpZeroAlpha && curA === 0) curA = 255;
+      syncPopoverAndTargetUI('canvas');
+      return;
+    }
+
+    if (activeCanvasZone === 'sv_square') {
+      const sqX = wheelCx - svHalf;
+      const sqY = wheelCy - svHalf;
+      const sqSize = svHalf * 2;
+      curS = Math.max(0, Math.min(1, (x - sqX) / sqSize));
+      curV = Math.max(0, Math.min(1, 1 - (y - sqY) / sqSize));
+      if (autoBumpZeroAlpha && curA === 0) curA = 255;
+      syncPopoverAndTargetUI('canvas');
+    }
+  };
+
+  canvas.addEventListener('mousedown', (e) => {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    const rect = canvas.getBoundingClientRect();
+    const x = (e.clientX - rect.left) * (cssW / Math.max(1, rect.width));
+    const y = (e.clientY - rect.top) * (cssH / Math.max(1, rect.height));
+
+    if (x >= valBarX - 8 && x <= valBarX + valBarW + 10) {
+      activeCanvasZone = 'val_bar';
+    } else if (wheelMode === 'wheel') {
+      activeCanvasZone = 'wheel_disc';
+    } else {
+      const dist = Math.hypot(x - wheelCx, y - wheelCy);
+      if (dist >= ringInnerRadius - 4) {
+        activeCanvasZone = 'hue_ring';
+      } else {
+        activeCanvasZone = 'sv_square';
+      }
+    }
+
+    updateFromCanvasEvent(e);
+
+    const onMove = (moveEvt) => updateFromCanvasEvent(moveEvt);
+    const onUp = () => {
+      activeCanvasZone = null;
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+    };
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+  });
+
+  // Opacity / Alpha Track Drag
+  const alphaTrack = popoverEl.querySelector('#mw-cw-alpha-track');
+  if (alphaTrack) {
+    const updateAlphaFromEvent = (e) => {
+      const rect = alphaTrack.getBoundingClientRect();
+      const pct = Math.max(0, Math.min(100, Math.round(((e.clientX - rect.left) / Math.max(1, rect.width)) * 100)));
+      curA = pctToAlpha(pct);
+      syncPopoverAndTargetUI('alpha_bar');
+    };
+    alphaTrack.addEventListener('mousedown', (e) => {
+      if (e.button !== 0) return;
+      e.preventDefault();
+      updateAlphaFromEvent(e);
+      const onMove = (mEvt) => updateAlphaFromEvent(mEvt);
+      const onUp = () => {
+        window.removeEventListener('mousemove', onMove);
+        window.removeEventListener('mouseup', onUp);
+      };
+      window.addEventListener('mousemove', onMove);
+      window.addEventListener('mouseup', onUp);
+    });
+  }
+
+  // Draggable Popover Header
+  const dragHeader = popoverEl.querySelector('#mw-cw-drag-header');
+  if (dragHeader) {
+    dragHeader.addEventListener('mousedown', (e) => {
+      if (e.button !== 0 || e.target.closest('button')) return;
+      e.preventDefault();
+      const startX = e.clientX;
+      const startY = e.clientY;
+      const boxRect = popoverEl.getBoundingClientRect();
+      const onMove = (mEvt) => {
+        const nx = Math.max(8, Math.min(window.innerWidth - boxRect.width - 8, boxRect.left + (mEvt.clientX - startX)));
+        const ny = Math.max(8, Math.min(window.innerHeight - boxRect.height - 8, boxRect.top + (mEvt.clientY - startY)));
+        popoverEl.style.left = `${Math.round(nx)}px`;
+        popoverEl.style.top = `${Math.round(ny)}px`;
+      };
+      const onUp = () => {
+        window.removeEventListener('mousemove', onMove);
+        window.removeEventListener('mouseup', onUp);
+      };
+      window.addEventListener('mousemove', onMove);
+      window.addEventListener('mouseup', onUp);
+    });
+  }
+
+  // Mode Toggle ([ ◎ Wheel | ▣ SV Box ])
+  popoverEl.querySelectorAll('[data-cw-mode]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      wheelMode = btn.dataset.cwMode === 'ring' ? 'ring' : 'wheel';
+      popoverEl.querySelectorAll('[data-cw-mode]').forEach(b => b.classList.toggle('active', b === btn));
+      const cap = popoverEl.querySelector('#mw-cw-wheel-caption');
+      if (cap) {
+        cap.textContent = wheelMode === 'ring' ? 'Hue Ring & SV Square' : 'Hue & Saturation Wheel';
+      }
+      drawCanvas();
+    });
+  });
+
+  // Hex Input inside Popover
+  const cwHexInp = popoverEl.querySelector('#mw-cw-hex-inp');
+  if (cwHexInp) {
+    const applyHexInput = () => {
+      const parsed = hex6ToRgba(cwHexInp.value, curA);
+      if (parsed) {
+        const hsv = rgbToHsv(parsed.r, parsed.g, parsed.b);
+        curH = hsv.h;
+        curS = hsv.s;
+        curV = hsv.v;
+        if (autoBumpZeroAlpha && curA === 0) curA = 255;
+        syncPopoverAndTargetUI('hex');
+      }
+    };
+    cwHexInp.addEventListener('input', applyHexInput);
+    cwHexInp.addEventListener('change', () => {
+      applyHexInput();
+      cwHexInp.value = rgbToHex6(hsvToRgb(curH, curS, curV));
+    });
+  }
+
+  // R / G / B / A% Inputs inside Popover
+  const cwR = popoverEl.querySelector('#mw-cw-r-inp');
+  const cwG = popoverEl.querySelector('#mw-cw-g-inp');
+  const cwB = popoverEl.querySelector('#mw-cw-b-inp');
+  const cwA = popoverEl.querySelector('#mw-cw-a-inp');
+
+  const onRgbBoxInput = () => {
+    const r = Math.max(0, Math.min(255, parseInt(cwR?.value, 10) || 0));
+    const g = Math.max(0, Math.min(255, parseInt(cwG?.value, 10) || 0));
+    const b = Math.max(0, Math.min(255, parseInt(cwB?.value, 10) || 0));
+    const hsv = rgbToHsv(r, g, b);
+    curH = hsv.h;
+    curS = hsv.s;
+    curV = hsv.v;
+    if (autoBumpZeroAlpha && curA === 0) curA = 255;
+    syncPopoverAndTargetUI('rgb');
+  };
+  if (cwR) cwR.addEventListener('input', onRgbBoxInput);
+  if (cwG) cwG.addEventListener('input', onRgbBoxInput);
+  if (cwB) cwB.addEventListener('input', onRgbBoxInput);
+  if (cwA) {
+    cwA.addEventListener('input', () => {
+      const pct = Math.max(0, Math.min(100, parseInt(cwA.value, 10) || 0));
+      curA = pctToAlpha(pct);
+      syncPopoverAndTargetUI('alpha');
+    });
+  }
+
+  // Revert to Original Color button
+  const revertBtn = popoverEl.querySelector('#mw-cw-revert-btn');
+  if (revertBtn) {
+    revertBtn.addEventListener('click', () => {
+      const hsv = rgbToHsv(origColor.r, origColor.g, origColor.b);
+      curH = hsv.h;
+      curS = hsv.s;
+      curV = hsv.v;
+      curA = origColor.a;
+      syncPopoverAndTargetUI('revert');
+    });
+  }
+
+  // Copy Hex button
+  const copyHexBtn = popoverEl.querySelector('#mw-cw-copy-hex-btn');
+  if (copyHexBtn) {
+    copyHexBtn.addEventListener('click', () => {
+      const hex6 = rgbToHex6(hsvToRgb(curH, curS, curV));
+      copyToClipboard(`#${hex6}`, 'Hex Color');
+    });
+  }
+
+  // 16 Quick Palette Swatches
+  popoverEl.querySelectorAll('[data-cw-swatch]').forEach(swBtn => {
+    swBtn.addEventListener('click', () => {
+      const parsed = hex6ToRgba(swBtn.dataset.cwSwatch, curA);
+      if (!parsed) return;
+      const hsv = rgbToHsv(parsed.r, parsed.g, parsed.b);
+      curH = hsv.h;
+      curS = hsv.s;
+      curV = hsv.v;
+      if (autoBumpZeroAlpha && curA === 0) curA = 255;
+      syncPopoverAndTargetUI('swatch');
+    });
+  });
+
+  // Close Button, Outside Click, & Escape Key
+  const closeBtn = popoverEl.querySelector('#mw-cw-close-btn');
+  if (closeBtn) {
+    closeBtn.addEventListener('click', () => closeColorWheelPopover(true));
+  }
+
+  const onDocMouseDown = (e) => {
+    if (popoverEl.contains(e.target)) return;
+    if (e.target.closest && e.target.closest(`[data-summon-color-wheel="${prefixId}"]`)) return;
+    closeColorWheelPopover(true);
+  };
+
+  const onDocKeyDown = (e) => {
+    if (e.key === 'Escape') {
+      closeColorWheelPopover(true);
+    }
+  };
+
+  setTimeout(() => {
+    document.addEventListener('mousedown', onDocMouseDown);
+    document.addEventListener('keydown', onDocKeyDown);
+  }, 0);
+
+  _activeColorWheelSession = {
+    prefixId,
+    popoverEl,
+    onFinalCommit,
+    cleanupListeners: () => {
+      document.removeEventListener('mousedown', onDocMouseDown);
+      document.removeEventListener('keydown', onDocKeyDown);
+    }
+  };
+}
+
+// ============================================================================
 // FULLSCREEN & UI ANIMATION VFX REGISTRY 
 // 1. FullscreenUIAnimationControl (10002001..10002037): 23 Looping + 14 Non-Looping
 // 2. UIAnimationControl (10001001..10001160): 62 Looping + 98 Non-Looping Particle Effects
@@ -392,16 +1217,16 @@ export function getVfxPresetMeta(animationId, className = '') {
 // CLIENT CONTROL TEMPLATE LIST FOR REFERENCECONTROL 
 // ============================================================================
 export const REFERENCE_TEMPLATE_PRESETS = [
-  { index: 1073741954, name: 'TextBoxControl', icon: 'T', className: 'ClientUITextBoxControl', desc: 'Template (Index 1073741954)' },
-  { index: 1073741849, name: 'TextBoxControl (Base)', icon: 'T', className: 'ClientUITextBoxControl', desc: 'Standard TextBox template' },
-  { index: 1073741850, name: 'ImageControl', icon: '▣', className: 'ClientUIImageControl', desc: 'Standard ImageControl template' },
-  { index: 1073741851, name: 'PresetButtonControl', icon: 'Btn', className: 'ClientUIPresetButtonControl', desc: 'Standard Button template' },
-  { index: 1073741852, name: 'ContainerControl', icon: '□', className: 'ClientUIContainerControl', desc: 'Standard ContainerControl template' },
-  { index: 1073741854, name: 'TextWindowControl', icon: '▤', className: 'ClientUITextWindowControl', desc: 'Scrollable TextWindow template' },
+  { index: 1073741954, name: 'TextBoxControl', icon: '🔤', className: 'ClientUITextBoxControl', desc: 'Template (Index 1073741954)' },
+  { index: 1073741849, name: 'TextBoxControl (Base)', icon: '🔤', className: 'ClientUITextBoxControl', desc: 'Standard TextBox template' },
+  { index: 1073741850, name: 'ImageControl', icon: '🖼️', className: 'ClientUIImageControl', desc: 'Standard ImageControl template' },
+  { index: 1073741851, name: 'PresetButtonControl', icon: '🔘', className: 'ClientUIPresetButtonControl', desc: 'Standard Button template' },
+  { index: 1073741852, name: 'ContainerControl', icon: '📁', className: 'ClientUIContainerControl', desc: 'Standard ContainerControl template' },
+  { index: 1073741854, name: 'TextWindowControl', icon: '📄', className: 'ClientUITextWindowControl', desc: 'Scrollable TextWindow template' },
   { index: 1073741855, name: 'GridScrollerControl', icon: '⊞', className: 'ClientUIGridScrollerControl', desc: 'GridScroller template' },
-  { index: 1073741856, name: 'CursorEventAreaControl', icon: '⌖', className: 'ClientUICursorEventAreaControl', desc: 'Cursor click response area template' },
-  { index: 1073741857, name: 'AnimationControl', icon: '▶', className: 'ClientUIAnimationControl', desc: 'UI Animation widget template' },
-  { index: 1073741858, name: 'KeyHintControl', icon: '1', className: 'ClientUIKeyHintControl', desc: 'Dynamic KeyHint badge template' },
+  { index: 1073741856, name: 'CursorEventAreaControl', icon: '🖱️', className: 'ClientUICursorEventAreaControl', desc: 'Cursor click response area template' },
+  { index: 1073741857, name: 'UIAnimationControl', icon: '✨', className: 'ClientUIAnimationControl', desc: 'UI Animation widget template' },
+  { index: 1073741858, name: 'KeyHintControl', icon: '⌨️', className: 'ClientUIKeyHintControl', desc: 'Dynamic KeyHint badge template' },
   { index: 1073741860, name: 'FullscreenAnimationControl', icon: '⛶', className: 'ClientUIFullscreenAnimationControl', desc: 'Fullscreen VFX overlay template' }
 ];
 
@@ -1190,7 +2015,7 @@ export function renderStageImageVisualHTML(node, innerTransform = '') {
   `;
 }
 
-// Render a Color Swatch + Hex Input + Paint Bucket Icon + Opacity % Box row
+// Render a Color Swatch + Hex Input + Color Wheel Icon + Opacity % Box row
 function renderColorRowHTML(label, prefixId, colorObj, defaultHex = 'FFFFFF', defaultAlphaPct = 100, showCheckerWhenZero = false) {
   const hex6 = rgbToHex6(colorObj, defaultHex);
   const alphaPct = alphaToPct(colorObj, defaultAlphaPct);
@@ -1199,14 +2024,26 @@ function renderColorRowHTML(label, prefixId, colorObj, defaultHex = 'FFFFFF', de
   return `
     <div class="mw-field-group">
       <div class="mw-basic-label">${label}</div>
-      <div class="mw-color-row">
+      <div class="mw-color-row" data-color-row="${prefixId}">
         <div class="mw-color-hex-box">
-          <label class="mw-color-swatch-wrap ${isZeroAlpha ? 'zero-alpha' : ''}" title="Click to pick color">
-            <span class="mw-color-swatch-fill" style="background: #${hex6}; opacity: ${Math.max(0.15, alphaPct / 100)};"></span>
-            <input type="color" id="${prefixId}-picker" value="#${hex6.toLowerCase()}" />
-          </label>
-          <input type="text" class="mw-color-hex-inp" id="${prefixId}-hex" maxlength="6" value="${hex6}" spellcheck="false" autocomplete="off" />
-          <span class="mw-color-bucket-icon" title="Hex RGB Color">⬦</span>
+          <button type="button" class="mw-color-swatch-wrap ${isZeroAlpha ? 'zero-alpha' : ''}" id="${prefixId}-swatch-btn" data-summon-color-wheel="${prefixId}" data-color-label="${escapeHtml(label)}" title="Click to summon Color Wheel / Picker for ${escapeHtml(label)}">
+            <span class="mw-color-swatch-fill" id="${prefixId}-swatch-fill" style="background: #${hex6}; opacity: ${Math.max(0.15, alphaPct / 100)};"></span>
+          </button>
+          <input type="text" class="mw-color-hex-inp" id="${prefixId}-hex" maxlength="6" value="${hex6}" spellcheck="false" autocomplete="off" title="Type 6-digit Hex or click the Color Swatch / Color Wheel icon to pick visually" />
+          <button type="button" class="mw-color-wheel-trigger-btn" id="${prefixId}-wheel-btn" data-summon-color-wheel="${prefixId}" data-color-label="${escapeHtml(label)}" title="Summon Color Wheel / Picker for ${escapeHtml(label)}">
+            <svg viewBox="0 0 18 18" width="14" height="14" class="mw-color-wheel-svg">
+              <defs>
+                <linearGradient id="cw-grad-${prefixId}" x1="0%" y1="0%" x2="100%" y2="100%">
+                  <stop offset="0%" stop-color="#ff5e5e"/>
+                  <stop offset="35%" stop-color="#f5b82e"/>
+                  <stop offset="70%" stop-color="#38bdf8"/>
+                  <stop offset="100%" stop-color="#c084fc"/>
+                </linearGradient>
+              </defs>
+              <circle cx="9" cy="9" r="6.8" fill="none" stroke="url(#cw-grad-${prefixId})" stroke-width="2.6"/>
+              <circle cx="9" cy="9" r="2.3" id="${prefixId}-wheel-dot" fill="#${hex6}" stroke="rgba(255,255,255,0.75)" stroke-width="0.7"/>
+            </svg>
+          </button>
         </div>
         <div class="mw-color-alpha-box" title="Opacity (0% - 100%)">
           <input type="number" min="0" max="100" step="1" id="${prefixId}-alpha" value="${alphaPct}" />
@@ -1337,8 +2174,8 @@ function renderTextBoxInspectorCardHTML(node, state) {
             </button>
           </div>
 
-          <!-- Outline Color (Only shown when Enable Text Outline is ON -->
-          ${node.enableOutline ? renderColorRowHTML('Outline Color', 'mw-tb-outlinecolor', node.outlineColor, '333333', 20, true) : ''}
+          <!-- Outline Color (Always accessible; picking a color auto-enables Text Outline if off) -->
+          ${renderColorRowHTML('Outline Color', 'mw-tb-outlinecolor', node.outlineColor, '333333', 20, true)}
 
           <!-- Align (Left / Center / Right + Top / Middle / Bottom) -->
           <div class="mw-field-group">
@@ -2688,7 +3525,7 @@ export function renderSideSelectorPanelHTML(project, selectedNode, state) {
       <aside class="mw-side-selector-panel" id="mw-side-selector-panel">
         <div class="mw-side-selector-header">
           <div class="mw-side-selector-title-group">
-            <span class="mw-side-selector-hdr-icon">Btn</span>
+            <span class="mw-side-selector-hdr-icon">🔘</span>
             <span class="mw-side-selector-title">${escapeHtml(slotMeta.title)}</span>
           </div>
           <button type="button" class="mw-side-selector-close" id="mw-side-selector-close-btn" title="Close Selector">✕</button>
@@ -2975,6 +3812,12 @@ export function buildControlSpecificLuaLines(node, project = null) {
     }
     if (node.bgColor && node.bgColor.a > 0) {
       lines.push(`ctrl.bgColor = Color.FromRGBA(${node.bgColor.r}, ${node.bgColor.g}, ${node.bgColor.b}, ${node.bgColor.a})`);
+    }
+    if (node.enableOutline) {
+      lines.push(`ctrl.enableOutline = true`);
+      if (node.outlineColor) {
+        lines.push(`ctrl.outlineColor = Color.FromRGBA(${node.outlineColor.r}, ${node.outlineColor.g}, ${node.outlineColor.b}, ${node.outlineColor.a ?? 255})`);
+      }
     }
     if (node.text !== undefined) {
       lines.push(`ctrl.text = ${JSON.stringify(node.text)}`);
@@ -3853,7 +4696,7 @@ export function bindControlSpecificInspectorEvents({
         id: contId,
         userdataHandle: maxH + 7,
         depth: (selectedNode.depth || 1) + 1,
-        icon: '□',
+        icon: '📁',
         name: `${stateTag}_Container`,
         className: 'ClientUIContainerControl',
         prefabIndex: 1073741852,
@@ -3873,7 +4716,7 @@ export function bindControlSpecificInspectorEvents({
         id: bgId,
         userdataHandle: maxH + 14,
         depth: (selectedNode.depth || 1) + 2,
-        icon: '▣',
+        icon: '🖼️',
         name: `${stateTag}_Bg`,
         className: 'ClientUIImageControl',
         prefabIndex: 1073741850,
@@ -3895,7 +4738,7 @@ export function bindControlSpecificInspectorEvents({
         id: txtId,
         userdataHandle: maxH + 21,
         depth: (selectedNode.depth || 1) + 2,
-        icon: 'T',
+        icon: '🔤',
         name: `${stateTag}_Label`,
         className: 'ClientUITextBoxControl',
         prefabIndex: 1073741849,
@@ -3939,32 +4782,86 @@ export function bindControlSpecificInspectorEvents({
     });
   }
 
-  // Helper to bind a Color Row (picker + hex + alpha %)
-  const bindColorControl = (prefixId, getColorObj, setColorObj) => {
-    const picker = container.querySelector(`#${prefixId}-picker`);
+  // Helper to bind a Color Row (Color Wheel Popover + Hex + Alpha %)
+  const bindColorControl = (prefixId, getColorObj, setColorObj, extraOnPick = null) => {
     const hexInp = container.querySelector(`#${prefixId}-hex`);
     const alphaInp = container.querySelector(`#${prefixId}-alpha`);
+    const triggerBtns = container.querySelectorAll(`[data-summon-color-wheel="${prefixId}"]`);
 
-    if (picker) {
-      picker.addEventListener('input', () => {
-        const curr = getColorObj();
-        const next = hex6ToRgba(picker.value, curr ? curr.a : 255);
-        if (next) {
-          // If alpha was 0 and user picks a color from the swatch, make it visible if it's text/fill
-          setColorObj(next);
-          if (hexInp) hexInp.value = rgbToHex6(next);
-          syncStageControlInnerVisual(container, selectedNode);
-        }
+    const syncRowDOM = (colObj) => {
+      if (!colObj) return;
+      const hex6 = rgbToHex6(colObj);
+      const alphaPct = alphaToPct(colObj, 100);
+      const curHexInp = container.querySelector(`#${prefixId}-hex`);
+      const curAlphaInp = container.querySelector(`#${prefixId}-alpha`);
+      const curSwatchFill = container.querySelector(`#${prefixId}-swatch-fill`);
+      const curSwatchBtn = container.querySelector(`#${prefixId}-swatch-btn`);
+      const curWheelDot = container.querySelector(`#${prefixId}-wheel-dot`);
+
+      if (curHexInp && document.activeElement !== curHexInp) {
+        curHexInp.value = hex6;
+      }
+      if (curAlphaInp && document.activeElement !== curAlphaInp) {
+        curAlphaInp.value = String(alphaPct);
+      }
+      if (curSwatchFill) {
+        curSwatchFill.style.background = `#${hex6}`;
+        curSwatchFill.style.opacity = String(Math.max(0.15, alphaPct / 100));
+      }
+      if (curSwatchBtn) {
+        curSwatchBtn.classList.toggle('zero-alpha', alphaPct === 0);
+      }
+      if (curWheelDot) {
+        curWheelDot.setAttribute('fill', `#${hex6}`);
+      }
+    };
+
+    triggerBtns.forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const label = btn.dataset.colorLabel || 'Color Picker';
+        openColorWheelPopover({
+          prefixId,
+          label: `${selectedNode.name} · ${label}`,
+          anchorEl: btn,
+          getColorObj,
+          autoBumpZeroAlpha: true,
+          showAlpha: true,
+          onColorChange: (nextCol) => {
+            setColorObj(nextCol);
+            if (typeof extraOnPick === 'function') extraOnPick(nextCol);
+            syncRowDOM(nextCol);
+            syncStageControlInnerVisual(container, selectedNode);
+          },
+          onFinalCommit: () => {
+            render();
+          }
+        });
       });
-      picker.addEventListener('change', () => render());
-    }
+    });
 
     if (hexInp) {
+      hexInp.addEventListener('input', () => {
+        const clean = hexInp.value.replace(/[^0-9a-fA-F]/g, '');
+        if (clean.length === 6) {
+          const curr = getColorObj();
+          const next = hex6ToRgba(clean, curr ? curr.a : 255);
+          if (next) {
+            if (next.a === 0) next.a = 255;
+            setColorObj(next);
+            if (typeof extraOnPick === 'function') extraOnPick(next);
+            syncRowDOM(next);
+            syncStageControlInnerVisual(container, selectedNode);
+          }
+        }
+      });
       hexInp.addEventListener('change', () => {
         const curr = getColorObj();
         const next = hex6ToRgba(hexInp.value, curr ? curr.a : 255);
         if (next) {
+          if (next.a === 0) next.a = 255;
           setColorObj(next);
+          if (typeof extraOnPick === 'function') extraOnPick(next);
           render();
         } else {
           hexInp.value = rgbToHex6(curr);
@@ -3977,6 +4874,7 @@ export function bindControlSpecificInspectorEvents({
         const curr = getColorObj();
         if (!curr) return;
         curr.a = pctToAlpha(alphaInp.value);
+        syncRowDOM(curr);
         syncStageControlInnerVisual(container, selectedNode);
       };
       alphaInp.addEventListener('input', updateAlpha);
@@ -4083,7 +4981,21 @@ export function bindControlSpecificInspectorEvents({
   // Text Color, Background Color, Outline Toggle & Outline Color
   bindColorControl('mw-tb-fontcolor', () => selectedNode.fontColor, (c) => { selectedNode.fontColor = c; });
   bindColorControl('mw-tb-bgcolor', () => selectedNode.bgColor, (c) => { selectedNode.bgColor = c; });
-  bindColorControl('mw-tb-outlinecolor', () => selectedNode.outlineColor, (c) => { selectedNode.outlineColor = c; });
+  bindColorControl(
+    'mw-tb-outlinecolor',
+    () => selectedNode.outlineColor,
+    (c) => { selectedNode.outlineColor = c; },
+    () => {
+      if (!selectedNode.enableOutline) {
+        selectedNode.enableOutline = true;
+        const outToggleEl = container.querySelector('#mw-tb-toggle-outline');
+        if (outToggleEl) {
+          outToggleEl.classList.add('on');
+          outToggleEl.setAttribute('aria-checked', 'true');
+        }
+      }
+    }
+  );
 
   const outlineToggle = container.querySelector('#mw-tb-toggle-outline');
   if (outlineToggle) {
@@ -4123,21 +5035,54 @@ export function bindControlSpecificInspectorEvents({
   }
 
   container.querySelectorAll('[data-insert-tag]').forEach(tagBtn => {
-    tagBtn.addEventListener('click', () => {
+    tagBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
       if (!tbTextarea) return;
       const kind = tagBtn.dataset.insertTag;
       const start = tbTextarea.selectionStart ?? tbTextarea.value.length;
       const end = tbTextarea.selectionEnd ?? tbTextarea.value.length;
       const selectedText = tbTextarea.value.slice(start, end) || 'Text';
 
+      if (kind === 'color') {
+        let currentRichCol = { r: 245, g: 184, b: 46, a: 255 };
+        const openTagPrefix = '<color=#';
+        const closeTag = '</color>';
+        const beforeText = tbTextarea.value.slice(0, start);
+        const afterText = tbTextarea.value.slice(end);
+
+        const applyRichColorHex = (hex6) => {
+          const nextVal = `${beforeText}${openTagPrefix}${hex6}>${selectedText}${closeTag}${afterText}`;
+          selectedNode.text = nextVal;
+          const liveTa = container.querySelector('#mw-tb-content-textarea');
+          if (liveTa) liveTa.value = nextVal;
+          syncStageControlInnerVisual(container, selectedNode);
+        };
+
+        applyRichColorHex('F5B82E');
+
+        openColorWheelPopover({
+          prefixId: 'mw-rt-color-tag',
+          label: `${selectedNode.name} · Rich Text <color>`,
+          anchorEl: tagBtn,
+          getColorObj: () => currentRichCol,
+          autoBumpZeroAlpha: true,
+          showAlpha: false,
+          onColorChange: (nextCol, hex6) => {
+            currentRichCol = nextCol;
+            applyRichColorHex(hex6);
+          },
+          onFinalCommit: () => {
+            render();
+          }
+        });
+        return;
+      }
+
       let openTag = '<b>';
       let closeTag = '</b>';
       if (kind === 'i') {
         openTag = '<i>';
         closeTag = '</i>';
-      } else if (kind === 'color') {
-        openTag = '<color=#F5B82E>';
-        closeTag = '</color>';
       } else if (kind === 'size') {
         openTag = '<size=24>';
         closeTag = '</size>';

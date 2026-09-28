@@ -64,59 +64,66 @@ export async function grabLuaFile(fileName) {
 export const exampleDefinitions = [
   {
     id: "tetri_shot",
-    title: "Tetri-Shot Arcade Engine (Tetri-shot.lua)",
+    title: "Tetri-Shot Arcade Engine",
     filename: "lua_examples/Tetri-shot.lua",
+    thumbnail: "./lua_examples/img/ttr_shot.jpg",
     category: "Game Systems",
     tags: ["Playable Game", "Tetris", "Cursor Aim", "Physics Particles", "Screen Shake", "Input Events"],
-    description: "An arcade puzzle shooter combining Tetris piece falling and cursor-aimed block shooting. Features screen shake, line-clearing particle explosions, panic countdown bar, and CW/CCW piece rotation."
+    description: "An arcade puzzle shooter combining Tetris piece falling and cursor-aimed block shooting. Features top-line overflow detection, screen shake, line-clearing particle explosions, panic countdown bar, and CW/CCW piece rotation."
   },
   {
     id: "realm_mad_mage",
-    title: "Procedural Bullet-Hell ARPG (realm_mad_mage.lua)",
+    title: "Procedural Bullet-Hell ARPG",
     filename: "lua_examples/realm_mad_mage.lua",
+    thumbnail: "./lua_examples/img/mad_mage.jpg",
     category: "Game Systems",
-    tags: ["Playable Game", "Bullet-Hell", "Endless Procedural Map", "Wizard Spellbomb", "Loot Bags", "Boss Spawn"],
-    description: "Infinite grasslands, brick roads, and projectile-blocking forest trees as a Wizard firing twin arcane staff bolts and cursor-targeted Spellbomb Novas."
+    tags: ["Playable Game", "Bullet-Hell", "Alien Biome Progression", "Wizard Spellbomb", "Loot Bags", "Boss Scaling"],
+    description: "Endless multi-realm bullet-hell ARPG. Slay monsters to summon each realm's Boss; defeating the Boss warps you into new Alien Biomes with scaling enemy levels, HP, ATK, and endless high-score tracking."
   },
   {
     id: "platform_fighter",
-    title: "Platform Fighter (fighter.lua)",
+    title: "Platform Fighter",
     filename: "lua_examples/fighter.lua",
+    thumbnail: "./lua_examples/img/fighter.jpg",
     category: "Game Systems",
     tags: ["Playable Game", "Platform Fighter", "Detached Limbs", "Weapon Swings", "Juggling & Bounce %", "Chain Ledge Grapple"],
     description: "A fast-paced Brawlhalla / SSBM platform fighter, directional weapon swings (Side Slash, Up-Juggle Launcher, Down-Air Meteor Spike, Heavy Smash), Damage % elastic bounce buildup, and an 8-link segmented grapple chain for off-stage ledge recovery."
   },
   {
     id: "north_racer",
-    title: "Northbound Drift Racer (north_racer.lua)",
+    title: "North Racer",
     filename: "lua_examples/north_racer.lua",
+    thumbnail: "./lua_examples/img/north_racer.jpg",
     category: "Game Systems",
-    tags: ["Playable Game", "Top-Down", "Procedural Road", "Powersliding", "Drift Physics", "Pace Notes", "Object Pooling"],
-    description: "A 2D top-down northbound highway racer with procedural road, rally pace-note lookahead callouts for upcoming corners, local-frame tire grip & handbrake powersliding physics, dual rear-wheel skidmarks, tire smoke particles, and drift combo scoring."
+    tags: ["Playable Game", "North Race", "Powersliding", "Drift Physics", "Pace Notes"],
+    description: "A 2D top-down racer with procedural turns, rally pace-note callouts, tire temperature & powerslide scrub physics, and drift combo scoring."
   },
   {
     id: "platformer_1_1",
-    title: "Mario-like Platformer (platformer.lua)",
+    title: "Endless Klee Runner",
     filename: "lua_examples/platformer.lua",
+    thumbnail: "./lua_examples/img/klee_runner.jpg",
     category: "Game Systems",
-    tags: ["Playable Game", "Platformer", "Mario 1-1", "Collision Physics", "Goombas", "Squash Tween", "Input Events"],
-    description: "A complete platformer level featuring procedural level geometry, brick and bonus blocks with bouncing coins, walking Goombas with live squash tweens upon stomp, momentum running/sprinting, camera scrolling, flagpole celebration, and timer HUD."
+    tags: ["Playable Game", "Endless Klee Runner", "Dodoco & Jumpy Dumpty", "Elemental Slimes", "Mondstadt & Domain Cubes", "Platformer Tech"],
+    description: "An endless procedural Mondstadt platformer starring an articulated chibi Klee rig! Collect Dodoco from glowing Elemental Mystery Cubes to unlock Jumpy Dumpty Bomb Blasting against Elemental Slimes, with full platformer hidden tech (Spark-Speed airplane sprint, wall-kicks, corner correction, coyote time, crouch-sliding, and stomp combos)."
   },
   {
     id: "chess_game",
-    title: "Chess Game vs 250 ELO Bot (chess.lua)",
+    title: "Chess Game vs 250 ELO Bot",
     filename: "lua_examples/chess.lua",
+    thumbnail: "./lua_examples/img/chess.jpg",
     category: "Game Systems",
     tags: ["Playable Game", "250 ELO Bot", "3-Ply Alpha-Beta", "Castling", "En Passant", "Move Dots", "Checkmate"],
     description: "Complete chess engine where you play White against a 3-ply Alpha-Beta 250 ELO Black bot. Features legal move indicator dots & capture rings, Kingside/Queenside castling, En Passant, pawn promotion, and Check/Checkmate detection."
   },
   {
     id: "physics_pool",
-    title: "2D Physics Pool Simulation (physics_parent.lua)",
+    title: "2D Physics Pool Simulation",
     filename: "lua_examples/physics_parent.lua",
+    thumbnail: "./lua_examples/img/pool.jpg",
     category: "Physics & Mechanics",
-    tags: ["Physics", "Elastic Collisions", "Impulse Force", "Raycast Click", "Ball Pocketing"],
-    description: "A 2D billiards and particle simulation with sub-stepping, circle-circle elastic collision resolution, boundary friction, cue ball steering, and cursor impulse explosions."
+    tags: ["Physics", "2-Stage Cue Strike", "Mouse Stroke Speed", "Raycast Aim Line", "Elastic Collisions", "Ball Pocketing"],
+    description: "A 2D billiards simulation with a 2-stage Pool Cue mechanic (Stage 1: Aim with raycast guide; Stage 2: Locked-angle pullback & DPI-clamped mouse stroke speed calculation), sub-stepped elastic collisions, and ball pocketing."
   }
 ];
 

@@ -119,6 +119,15 @@
 --      - Keep `root` at `(0, 0)` with `SetSizeDelta(screenWidth, screenHeight)` and shift
 --        stage/HUD coordinates by `stageOffsetX = (screenWidth - 960) * 0.5`,
 --        `stageOffsetY = (screenHeight - 640) * 0.5`. Keeps raw cursor coordinates 1:1!
+--
+-- 10. CLOSING / EXITING AN ACTIVE UI SCRIPT (`ServerSignal:SendSignal()` + `root:SetActive(false)`):
+--    * When a player exits a minigame or UI overlay, first dispatch a `ServerSignal` so the
+--      stage's Server Node Graph knows the UI was closed:
+--        local exitSig = game.ServerSignal("EXIT_GAME")
+--        exitSig:SendSignal()
+--    * Then stop per-frame updates and deactivate the root UI container (`script.object`):
+--        script:EnableUpdate(false)
+--        script.object:SetActive(false)
 -- ============================================================================
 
 -- ============================================================================

@@ -6,6 +6,7 @@
 // ============================================================================
 
 import { MiliastraSimulator } from './lua-runtime.js';
+import { showToast } from './ui-components.js';
 
 let activeSimulator = null;
 let modalContainer = null;
@@ -262,6 +263,11 @@ export function openLuaRunnerModal(luaCode, scriptTitle = 'Miliastra Lua Simulat
     }
     const resolvedScene = typeof sceneConfig === 'function' ? sceneConfig() : sceneConfig;
     activeSimulator = new MiliastraSimulator(canvas, appendLog, simWidth, simHeight);
+    activeSimulator.onCloseRequest = (controlName, lastSignal) => {
+      closeLuaRunnerModal();
+      const sigMsg = lastSignal ? `ServerSignal("${lastSignal}"):SendSignal() → ` : '';
+      showToast(`${sigMsg}SetActive(false) closed simulation window`);
+    };
     activeSimulator.run(codeToRun, resolvedScene);
     updateStatusDisplay();
     if (canvas) canvas.focus();
