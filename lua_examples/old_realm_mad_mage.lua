@@ -73,7 +73,6 @@ local NUM_PARTICLES = 24
 local root = nil
 local worldLayer = nil
 local hudLayer = nil
-local grassBackdrop = nil
 local controls = {}
 
 -- Object Pools
@@ -94,110 +93,7 @@ local nextParticleIdx = 1
 local mage = nil
 local bossEntity = nil
 local bossSpawned = false
-local gameState = "PLAYING" -- "PLAYING" | "DEFEAT"
-local realmTier = 1
-local realmsCleared = 0
-local realmProgressScore = 0
-local targetBossScore = TARGET_BOSS_SCORE
-local bestScore = 0
-local biomeSeedOffset = 0
-local realmTransitionTimer = 0
-
-local BIOMES = {
-	{
-		name = "EMERALD GRASSLANDS",
-		bossTitle = "ORYX, ARCHON OF THE REALM",
-		backdrop = Color.FromRGB(132, 142, 58),
-		road = Color.FromRGB(142, 108, 72),
-		mortar = Color.FromRGB(115, 84, 52),
-		treePatch = Color.FromRGBA(78, 112, 54, 185),
-		trunk = Color.FromRGB(78, 46, 24),
-		canopy = Color.FromRGB(28, 76, 36),
-		canopyTop = Color.FromRGB(42, 102, 48),
-		moss = Color.FromRGBA(82, 118, 56, 165),
-		flower = Color.FromRGB(250, 250, 235),
-		bannerCol = Color.FromRGB(235, 205, 115)
-	},
-	{
-		name = "XENO-VOID NEBULA",
-		bossTitle = "XYLOTH, XENO-VOID OVERMIND",
-		backdrop = Color.FromRGB(38, 22, 68),
-		road = Color.FromRGB(56, 92, 138),
-		mortar = Color.FromRGB(88, 215, 235),
-		treePatch = Color.FromRGBA(65, 24, 98, 195),
-		trunk = Color.FromRGB(92, 38, 128),
-		canopy = Color.FromRGB(22, 148, 165),
-		canopyTop = Color.FromRGB(95, 245, 225),
-		moss = Color.FromRGBA(95, 32, 135, 175),
-		flower = Color.FromRGB(255, 85, 220),
-		bannerCol = Color.FromRGB(115, 245, 255)
-	},
-	{
-		name = "CRIMSON SULFUR CALDERA",
-		bossTitle = "MALAKOR, MOLTEN TITAN",
-		backdrop = Color.FromRGB(64, 24, 22),
-		road = Color.FromRGB(95, 48, 32),
-		mortar = Color.FromRGB(245, 115, 35),
-		treePatch = Color.FromRGBA(42, 14, 14, 195),
-		trunk = Color.FromRGB(52, 36, 36),
-		canopy = Color.FromRGB(165, 42, 28),
-		canopyTop = Color.FromRGB(245, 135, 42),
-		moss = Color.FromRGBA(115, 38, 22, 175),
-		flower = Color.FromRGB(255, 215, 65),
-		bannerCol = Color.FromRGB(255, 155, 75)
-	},
-	{
-		name = "ASTRAL CRYO-MOON",
-		bossTitle = "VEXARIS, STARFROST LEVIATHAN",
-		backdrop = Color.FromRGB(22, 52, 78),
-		road = Color.FromRGB(75, 125, 165),
-		mortar = Color.FromRGB(175, 235, 255),
-		treePatch = Color.FromRGBA(16, 38, 62, 195),
-		trunk = Color.FromRGB(52, 88, 118),
-		canopy = Color.FromRGB(48, 145, 205),
-		canopyTop = Color.FromRGB(165, 240, 255),
-		moss = Color.FromRGBA(35, 88, 128, 175),
-		flower = Color.FromRGB(195, 255, 255),
-		bannerCol = Color.FromRGB(155, 230, 255)
-	},
-	{
-		name = "CHITIN ACID HIVE-WORLD",
-		bossTitle = "NYXARA, BROOD EMPRESS",
-		backdrop = Color.FromRGB(28, 56, 36),
-		road = Color.FromRGB(72, 62, 92),
-		mortar = Color.FromRGB(165, 245, 65),
-		treePatch = Color.FromRGBA(48, 95, 28, 190),
-		trunk = Color.FromRGB(62, 42, 78),
-		canopy = Color.FromRGB(108, 38, 135),
-		canopyTop = Color.FromRGB(185, 245, 75),
-		moss = Color.FromRGBA(125, 215, 45, 155),
-		flower = Color.FromRGB(215, 95, 255),
-		bannerCol = Color.FromRGB(175, 250, 95)
-	},
-	{
-		name = "ELDRITCH SINGULARITY",
-		bossTitle = "OMEGA ORYX, VOID CELESTIAL",
-		backdrop = Color.FromRGB(26, 20, 38),
-		road = Color.FromRGB(138, 112, 54),
-		mortar = Color.FromRGB(245, 215, 110),
-		treePatch = Color.FromRGBA(58, 42, 88, 195),
-		trunk = Color.FromRGB(110, 88, 45),
-		canopy = Color.FromRGB(82, 45, 145),
-		canopyTop = Color.FromRGB(245, 205, 95),
-		moss = Color.FromRGBA(92, 68, 138, 175),
-		flower = Color.FromRGB(255, 235, 130),
-		bannerCol = Color.FromRGB(255, 215, 95)
-	}
-}
-
-local function GetCurrentBiome()
-	local idx = ((realmTier - 1) % #BIOMES) + 1
-	return BIOMES[idx]
-end
-
-local function GetEnemyRealmLevel()
-	return 1 + (realmTier - 1) * 3 + math.floor((mage and mage.level or 1) * 0.5)
-end
+local gameState = "PLAYING" -- "PLAYING" | "VICTORY" | "DEFEAT"
 
 local cursorX = 600
 local cursorY = 360
@@ -252,7 +148,7 @@ end
 -- Fast overflow-free deterministic 2D coordinate hash in [0, 1) for infinite world generation
 -- Works identically for negative, zero, and positive (gx, gy) without 64-bit bitwise overflow
 local function Hash2D(gx, gy)
-	local v = math.sin((gx + biomeSeedOffset) * 127.1 + (gy - biomeSeedOffset) * 311.7 + 19.19) * 43758.5453
+	local v = math.sin(gx * 127.1 + gy * 311.7 + 19.19) * 43758.5453
 	return v - math.floor(v)
 end
 
@@ -412,7 +308,7 @@ local function BuildWorldPools()
 	particlePool = {}
 
 	-- Olive-Green RotMG Grasslands Base Canvas (Full-bleed 2600x2600 centered on container)
-	grassBackdrop = NewImage(worldLayer, "GrassBackdrop", DESIGN_WIDTH * 0.5, DESIGN_HEIGHT * 0.5, 2600, 2600,
+	NewImage(worldLayer, "GrassBackdrop", DESIGN_WIDTH * 0.5, DESIGN_HEIGHT * 0.5, 2600, 2600,
 		Color.FromRGB(132, 142, 58), RECT_RES, false)
 
 	-- 1A. Pass 1: Ground Tiles & Cobblestone Mortar (Always underneath tree canopies!)
@@ -609,51 +505,27 @@ local function FindFreeEnemySlot()
 	return nil
 end
 
-local function ApplyBiomePalette()
-	local biome = GetCurrentBiome()
-	biomeSeedOffset = (realmTier - 1) * 137
-	featureCache = {}
-	featureCacheCount = 0
-	if grassBackdrop then
-		grassBackdrop.imageColor = biome.backdrop
-	end
-	for i = 1, #gridCells do
-		local cell = gridCells[i]
-		cell.gx = nil
-		cell.gy = nil
-		cell.feat = nil
-		if cell.trunk then cell.trunk.imageColor = biome.trunk end
-		if cell.canopy then cell.canopy.imageColor = biome.canopy end
-		if cell.canopyTop then cell.canopyTop.imageColor = biome.canopyTop end
-	end
-end
-
 local function SpawnMiniObsidianOrb(wx, wy)
 	local e = FindFreeEnemySlot()
 	if not e then return end
-	local hpScale = 1.0 + (realmTier - 1) * 0.65
-	local atkScale = 1.0 + (realmTier - 1) * 0.38
-	local scoreMult = 1.0 + (realmTier - 1) * 0.55
 	e.active = true
 	e.isBoss = false
 	e.kind = "MINI_ORB"
 	e.wx = wx
 	e.wy = wy
-	e.maxHp = math.floor((45 + mage.level * 6) * hpScale)
+	e.maxHp = 45 + mage.level * 6
 	e.hp = e.maxHp
-	e.atkMult = atkScale
-	e.enemyLv = GetEnemyRealmLevel()
 	e.radius = 12
 	e.fireTimer = 0.6 + math.random() * 0.5
 	e.phaseAngle = math.random() * 6.28
-	e.scoreValue = math.floor(30 * scoreMult)
-	e.xpValue = math.floor(14 * scoreMult)
+	e.scoreValue = 30
+	e.xpValue = 14
 
 	e.body:SetImage(Enum.ImageSource.StaticReference, CIRCLE_RES)
-	e.body.imageColor = (realmTier > 1) and Color.FromRGB(55, 22, 88) or Color.FromRGB(18, 22, 52)
+	e.body.imageColor = Color.FromRGB(18, 22, 52)
 	e.body:SetSizeDelta(20, 20)
 	e.detail:SetImage(Enum.ImageSource.StaticReference, RECT_RES)
-	e.detail.imageColor = (realmTier > 1) and Color.FromRGB(125, 255, 240) or Color.FromRGB(245, 250, 255)
+	e.detail.imageColor = Color.FromRGB(245, 250, 255)
 	e.detail:SetAnchoredPosition(19, 27)
 	e.detail:SetSizeDelta(5, 5)
 	e.weapon:SetVisible(false)
@@ -670,83 +542,76 @@ local function SpawnRealmMonster()
 	local wx = mage.wx + math.cos(ang) * dist
 	local wy = mage.wy + math.sin(ang) * dist
 
-	local hpScale = 1.0 + (realmTier - 1) * 0.65
-	local atkScale = 1.0 + (realmTier - 1) * 0.38
-	local scoreMult = 1.0 + (realmTier - 1) * 0.55
-	local isAlien = realmTier > 1
-
 	e.active = true
 	e.isBoss = false
 	e.wx = wx
 	e.wy = wy
-	e.atkMult = atkScale
-	e.enemyLv = GetEnemyRealmLevel()
 	e.phaseAngle = math.random() * math.pi * 2
 
 	local roll = math.random()
 	if roll < 0.34 then
-		-- 1. Goblin Archer / Alien Xeno-Hunter
+		-- 1. Goblin Archer (Green/Tan with Bow — Fires White/Gray Arrows)
 		e.kind = "GOBLIN"
-		e.maxHp = math.floor((68 + mage.level * 12) * hpScale)
+		e.maxHp = 68 + mage.level * 12
 		e.radius = 14
-		e.scoreValue = math.floor(50 * scoreMult)
-		e.xpValue = math.floor(20 * scoreMult)
+		e.scoreValue = 50
+		e.xpValue = 20
 		e.body:SetImage(Enum.ImageSource.StaticReference, RECT_RES)
-		e.body.imageColor = isAlien and Color.FromRGB(58, 175, 195) or Color.FromRGB(125, 152, 58)
+		e.body.imageColor = Color.FromRGB(125, 152, 58)
 		e.body:SetSizeDelta(24, 24)
 		e.detail:SetImage(Enum.ImageSource.StaticReference, RECT_RES)
-		e.detail.imageColor = isAlien and Color.FromRGB(255, 95, 235) or Color.FromRGB(228, 195, 118)
+		e.detail.imageColor = Color.FromRGB(228, 195, 118)
 		e.detail:SetAnchoredPosition(22, 28)
 		e.detail:SetSizeDelta(14, 9)
 		e.weapon:SetVisible(true)
-		e.weapon.imageColor = isAlien and Color.FromRGB(120, 245, 255) or Color.FromRGB(195, 205, 215)
+		e.weapon.imageColor = Color.FromRGB(195, 205, 215)
 		e.weapon:SetSizeDelta(6, 18)
 	elseif roll < 0.64 then
-		-- 2. Woodland Shadow Bat / Void Wing-Stalker
+		-- 2. Woodland Shadow Bat (Fast Dark Creature with Yellow Eyes)
 		e.kind = "BAT"
-		e.maxHp = math.floor((52 + mage.level * 9) * hpScale)
+		e.maxHp = 52 + mage.level * 9
 		e.radius = 13
-		e.scoreValue = math.floor(40 * scoreMult)
-		e.xpValue = math.floor(16 * scoreMult)
+		e.scoreValue = 40
+		e.xpValue = 16
 		e.body:SetImage(Enum.ImageSource.StaticReference, RECT_RES)
-		e.body.imageColor = isAlien and Color.FromRGB(78, 22, 115) or Color.FromRGB(24, 24, 28)
+		e.body.imageColor = Color.FromRGB(24, 24, 28)
 		e.body:SetSizeDelta(24, 16)
 		e.detail:SetImage(Enum.ImageSource.StaticReference, RECT_RES)
-		e.detail.imageColor = isAlien and Color.FromRGB(95, 255, 195) or Color.FromRGB(250, 220, 65)
+		e.detail.imageColor = Color.FromRGB(250, 220, 65)
 		e.detail:SetAnchoredPosition(22, 25)
 		e.detail:SetSizeDelta(10, 4)
 		e.weapon:SetVisible(false)
 	elseif roll < 0.88 then
-		-- 3. Obsidian Bomb Slime / Plasma Core Sphere
+		-- 3. Obsidian Bomb Slime (Round Black/Navy Sphere with White Shine — Fires Red Wand Bolts & Splits!)
 		e.kind = "BOMB_ORB"
-		e.maxHp = math.floor((115 + mage.level * 18) * hpScale)
+		e.maxHp = 115 + mage.level * 18
 		e.radius = 18
-		e.scoreValue = math.floor(85 * scoreMult)
-		e.xpValue = math.floor(32 * scoreMult)
+		e.scoreValue = 85
+		e.xpValue = 32
 		e.body:SetImage(Enum.ImageSource.StaticReference, CIRCLE_RES)
-		e.body.imageColor = isAlien and Color.FromRGB(42, 16, 78) or Color.FromRGB(14, 18, 48)
+		e.body.imageColor = Color.FromRGB(14, 18, 48)
 		e.body:SetSizeDelta(32, 32)
 		e.detail:SetImage(Enum.ImageSource.StaticReference, RECT_RES)
-		e.detail.imageColor = isAlien and Color.FromRGB(255, 110, 245) or Color.FromRGB(255, 255, 255)
+		e.detail.imageColor = Color.FromRGB(255, 255, 255)
 		e.detail:SetAnchoredPosition(18, 29)
 		e.detail:SetSizeDelta(8, 8)
 		e.weapon:SetVisible(false)
 	else
-		-- 4. Crimson Cultist / Alien Arch-Psion
+		-- 4. Crimson Cultist / Pyromancer (Fires Radial Fire-Rings)
 		e.kind = "PYRO"
-		e.maxHp = math.floor((145 + mage.level * 22) * hpScale)
+		e.maxHp = 145 + mage.level * 22
 		e.radius = 16
-		e.scoreValue = math.floor(110 * scoreMult)
-		e.xpValue = math.floor(42 * scoreMult)
+		e.scoreValue = 110
+		e.xpValue = 42
 		e.body:SetImage(Enum.ImageSource.StaticReference, TRI_RES)
-		e.body.imageColor = isAlien and Color.FromRGB(215, 42, 165) or Color.FromRGB(185, 38, 48)
+		e.body.imageColor = Color.FromRGB(185, 38, 48)
 		e.body:SetSizeDelta(28, 30)
 		e.detail:SetImage(Enum.ImageSource.StaticReference, STAR4_RES)
-		e.detail.imageColor = isAlien and Color.FromRGB(95, 250, 255) or Color.FromRGB(255, 215, 75)
+		e.detail.imageColor = Color.FromRGB(255, 215, 75)
 		e.detail:SetAnchoredPosition(22, 28)
 		e.detail:SetSizeDelta(12, 12)
 		e.weapon:SetVisible(true)
-		e.weapon.imageColor = isAlien and Color.FromRGB(175, 95, 255) or Color.FromRGB(255, 125, 45)
+		e.weapon.imageColor = Color.FromRGB(255, 125, 45)
 		e.weapon:SetSizeDelta(7, 22)
 	end
 
@@ -763,30 +628,25 @@ local function SpawnMadGodBoss()
 	local e = FindFreeEnemySlot() or enemyPool[1]
 	bossEntity = e
 
-	local biome = GetCurrentBiome()
 	local ang = math.random() * math.pi * 2
-	local bossHpScale = 1.0 + (realmTier - 1) * 0.72
-	local bossAtkScale = 1.0 + (realmTier - 1) * 0.42
 	e.active = true
 	e.isBoss = true
 	e.kind = "MAD_GOD_BOSS"
 	e.wx = mage.wx + math.cos(ang) * 340
 	e.wy = mage.wy + math.sin(ang) * 340
-	e.maxHp = math.floor(2200 * bossHpScale)
+	e.maxHp = 2200
 	e.hp = e.maxHp
-	e.atkMult = bossAtkScale
-	e.enemyLv = GetEnemyRealmLevel() + 5
 	e.radius = 28
 	e.fireTimer = 0.8
 	e.phaseAngle = 0
-	e.scoreValue = 1200 * realmTier
-	e.xpValue = 500 * realmTier
+	e.scoreValue = 1000
+	e.xpValue = 500
 
 	e.body:SetImage(Enum.ImageSource.StaticReference, RECT_RES)
-	e.body.imageColor = (realmTier > 1) and Color.FromRGB(58, 16, 85) or Color.FromRGB(35, 18, 48)
+	e.body.imageColor = Color.FromRGB(35, 18, 48)
 	e.body:SetSizeDelta(48, 48)
 	e.detail:SetImage(Enum.ImageSource.StaticReference, STAR5_RES)
-	e.detail.imageColor = biome.bannerCol
+	e.detail.imageColor = Color.FromRGB(255, 65, 85)
 	e.detail:SetAnchoredPosition(22, 28)
 	e.detail:SetSizeDelta(24, 24)
 	e.weapon:SetVisible(true)
@@ -799,7 +659,7 @@ local function SpawnMadGodBoss()
 	end
 	shakeTimer = 0.55
 	shakePower = 11
-	SpawnFloatingText(mage.wx, mage.wy + 25, "⚔ " .. biome.bossTitle .. " (LV." .. e.enemyLv .. ") AWAKENS! ⚔", Color.FromRGB(255, 85, 85), 15)
+	SpawnFloatingText(mage.wx, mage.wy + 25, "⚔ ORYX HAS AWAKENED! ⚔", Color.FromRGB(255, 85, 85), 16)
 end
 
 -- ============================================================================
@@ -883,17 +743,11 @@ local function MaybeDropLootBag(wx, wy, forceWhiteBag)
 	bag.control:SetVisible(true)
 end
 
-local function GrantScoreAndXP(scoreGain, xpGain, enemyWX, enemyWY, isBossKill)
+local function GrantScoreAndXP(scoreGain, xpGain, enemyWX, enemyWY)
 	mage.score = mage.score + scoreGain
-	if mage.score > bestScore then
-		bestScore = mage.score
-	end
-	if not isBossKill then
-		realmProgressScore = realmProgressScore + scoreGain
-	end
 	mage.xp = mage.xp + xpGain
 
-	SpawnFloatingText(mage.wx, mage.wy + 16, string.format("+%d PTS  +%dXP", scoreGain, xpGain), Color.FromRGB(185, 125, 255), 13)
+	SpawnFloatingText(mage.wx, mage.wy + 16, string.format("+%dXP", xpGain), Color.FromRGB(185, 125, 255), 13)
 
 	while mage.xp >= mage.xpToNext do
 		mage.xp = mage.xp - mage.xpToNext
@@ -907,51 +761,10 @@ local function GrantScoreAndXP(scoreGain, xpGain, enemyWX, enemyWY, isBossKill)
 		SpawnFloatingText(mage.wx, mage.wy + 32, "★ LEVEL UP! LV." .. mage.level .. " ★", Color.FromRGB(255, 225, 85), 15)
 	end
 
-	-- Summon the Realm Boss once the player fills the current Realm's Score Bar!
-	if not bossSpawned and realmProgressScore >= targetBossScore then
+	-- Summon the Mad God Boss once the player fills the Score Bar!
+	if not bossSpawned and mage.score >= TARGET_BOSS_SCORE then
 		SpawnMadGodBoss()
 	end
-end
-
-local function AdvanceToNextRealm(bossWX, bossWY)
-	MaybeDropLootBag(bossWX, bossWY, true)
-	GrantScoreAndXP(1200 * realmTier, 500 * realmTier, bossWX, bossWY, true)
-
-	realmsCleared = realmsCleared + 1
-	realmTier = realmTier + 1
-	realmProgressScore = 0
-	targetBossScore = math.floor(TARGET_BOSS_SCORE * (1.0 + (realmTier - 1) * 0.40))
-	bossSpawned = false
-	bossEntity = nil
-	if bossHpContainer then
-		bossHpContainer:SetVisible(false)
-	end
-
-	-- Clear active enemy projectiles & despawn old realm stragglers
-	for i = 1, NUM_BULLETS do
-		if bulletPool[i].active and not bulletPool[i].fromPlayer then
-			bulletPool[i].active = false
-			bulletPool[i].control:SetVisible(false)
-		end
-	end
-	for i = 1, NUM_ENEMIES do
-		enemyPool[i].active = false
-		enemyPool[i].control:SetVisible(false)
-	end
-
-	-- Shift world into the new Alien Location palette & terrain layout!
-	ApplyBiomePalette()
-	for _ = 1, 9 do
-		SpawnRealmMonster()
-	end
-
-	local newBiome = GetCurrentBiome()
-	realmTransitionTimer = 4.5
-	shakeTimer = 0.65
-	shakePower = 13
-	SpawnFloatingText(mage.wx, mage.wy + 36,
-		"★ WARPED TO REALM " .. realmTier .. ": " .. newBiome.name .. "! ★",
-		newBiome.bannerCol, 16)
 end
 
 -- ============================================================================
@@ -1075,60 +888,58 @@ local function UpdateEnemiesAndLoot(dt)
 					e.wy = ny
 				end
 
-				-- Enemy Bullet-Hell Attack Patterns (scaled by realmTier ATK & projectile speed)
+				-- Enemy Bullet-Hell Attack Patterns
 				e.fireTimer = e.fireTimer - dt
 				if e.fireTimer <= 0 and dist < 520 then
 					local deg = math.deg(angToMage) - 90
-					local atkMult = e.atkMult or (1.0 + (realmTier - 1) * 0.38)
-					local spdMult = 1.0 + math.min(0.45, (realmTier - 1) * 0.08)
 					if e.kind == "GOBLIN" then
-						e.fireTimer = math.max(0.85, 1.35 - (realmTier - 1) * 0.06)
+						e.fireTimer = 1.35
 						FireProjectile(false, e.wx, e.wy,
-							math.cos(angToMage) * 235 * spdMult, math.sin(angToMage) * 235 * spdMult,
-							5, math.floor(16 * atkMult), Color.FromRGB(230, 235, 240), TRI_RES, 2.2, deg)
+							math.cos(angToMage) * 235, math.sin(angToMage) * 235,
+							5, 16, Color.FromRGB(230, 235, 240), TRI_RES, 2.2, deg)
 					elseif e.kind == "BAT" then
-						e.fireTimer = math.max(0.95, 1.55 - (realmTier - 1) * 0.06)
+						e.fireTimer = 1.55
 						FireProjectile(false, e.wx, e.wy,
-							math.cos(angToMage) * 210 * spdMult, math.sin(angToMage) * 210 * spdMult,
-							5, math.floor(13 * atkMult), Color.FromRGB(195, 95, 250), STAR4_RES, 1.8, deg)
+							math.cos(angToMage) * 210, math.sin(angToMage) * 210,
+							5, 13, Color.FromRGB(195, 95, 250), STAR4_RES, 1.8, deg)
 					elseif e.kind == "BOMB_ORB" then
-						-- Fires spread of crimson/orange fire-wand bolts
-						e.fireTimer = math.max(1.05, 1.65 - (realmTier - 1) * 0.06)
+						-- Fires spread of crimson/orange fire-wand bolts (like in the screenshot!)
+						e.fireTimer = 1.65
 						for s = -2, 2 do
 							local a = angToMage + s * 0.22
 							FireProjectile(false, e.wx, e.wy,
-								math.cos(a) * 185 * spdMult, math.sin(a) * 185 * spdMult,
-								6, math.floor(20 * atkMult), Color.FromRGB(255, 65, 35), RECT_RES, 2.6, math.deg(a) - 90)
+								math.cos(a) * 185, math.sin(a) * 185,
+								6, 20, Color.FromRGB(255, 65, 35), RECT_RES, 2.6, math.deg(a) - 90)
 						end
 					elseif e.kind == "MINI_ORB" then
 						e.fireTimer = 1.45
 						FireProjectile(false, e.wx, e.wy,
-							math.cos(angToMage) * 195 * spdMult, math.sin(angToMage) * 195 * spdMult,
-							5, math.floor(14 * atkMult), Color.FromRGB(255, 90, 45), CIRCLE_RES, 2.2, 0)
+							math.cos(angToMage) * 195, math.sin(angToMage) * 195,
+							5, 14, Color.FromRGB(255, 90, 45), CIRCLE_RES, 2.2, 0)
 					elseif e.kind == "PYRO" then
-						e.fireTimer = math.max(1.15, 1.85 - (realmTier - 1) * 0.07)
+						e.fireTimer = 1.85
 						for k = 1, 8 do
 							local a = (k - 1) * (math.pi * 2 / 8) + e.phaseAngle
 							FireProjectile(false, e.wx, e.wy,
-								math.cos(a) * 165 * spdMult, math.sin(a) * 165 * spdMult,
-								6, math.floor(22 * atkMult), Color.FromRGB(255, 145, 45), STAR4_RES, 2.8, math.deg(a))
+								math.cos(a) * 165, math.sin(a) * 165,
+								6, 22, Color.FromRGB(255, 145, 45), STAR4_RES, 2.8, math.deg(a))
 						end
 					elseif e.isBoss then
-						-- Boss Multi-Pattern Barrage!
-						e.fireTimer = math.max(0.75, 1.15 - (realmTier - 1) * 0.06)
-						-- Pattern A: 12-Way Radial Nova
+						-- Oryx Mad God Multi-Pattern Barrage!
+						e.fireTimer = 1.15
+						-- Pattern A: 12-Way Crimson Radial Nova
 						for k = 1, 12 do
 							local a = (k - 1) * (math.pi * 2 / 12) + e.phaseAngle * 0.5
 							FireProjectile(false, e.wx, e.wy,
-								math.cos(a) * 175 * spdMult, math.sin(a) * 175 * spdMult,
-								7, math.floor(26 * atkMult), Color.FromRGB(255, 55, 75), STAR5_RES, 3.4, math.deg(a))
+								math.cos(a) * 175, math.sin(a) * 175,
+								7, 26, Color.FromRGB(255, 55, 75), STAR5_RES, 3.4, math.deg(a))
 						end
 						-- Pattern B: 5-Shot Aimed Shotgun Spread
 						for s = -2, 2 do
 							local a = angToMage + s * 0.16
 							FireProjectile(false, e.wx, e.wy,
-								math.cos(a) * 235 * spdMult, math.sin(a) * 235 * spdMult,
-								6, math.floor(24 * atkMult), Color.FromRGB(255, 195, 65), TRI_RES, 2.6, math.deg(a) - 90)
+								math.cos(a) * 235, math.sin(a) * 235,
+								6, 24, Color.FromRGB(255, 195, 65), TRI_RES, 2.6, math.deg(a) - 90)
 						end
 					end
 				end
@@ -1158,9 +969,7 @@ local function UpdateEnemiesAndLoot(dt)
 				else
 					mage.hp = mage.maxHp
 					mage.mp = mage.maxMp
-					mage.staffDamage = mage.staffDamage + 7
-					mage.fireRate = math.min(9.5, mage.fireRate + 0.5)
-					SpawnFloatingText(mage.wx, mage.wy + 24, "★ WHITE BAG: +7 STAFF DMG & FULL HEAL! ★", Color.FromRGB(255, 255, 255), 15)
+					SpawnFloatingText(mage.wx, mage.wy + 24, "★ WHITE BAG: DIVINE RELIC! ★", Color.FromRGB(255, 255, 255), 15)
 				end
 			end
 		end
@@ -1211,10 +1020,16 @@ local function UpdateProjectiles(dt)
 								end
 
 								if e.isBoss then
-									AdvanceToNextRealm(e.wx, e.wy)
+									gameState = "VICTORY"
+									MaybeDropLootBag(e.wx, e.wy, true)
+									shakeTimer = 0.65
+									shakePower = 14
+									if bossHpContainer then
+										bossHpContainer:SetVisible(false)
+									end
 								else
 									MaybeDropLootBag(e.wx, e.wy, false)
-									GrantScoreAndXP(e.scoreValue, e.xpValue, e.wx, e.wy, false)
+									GrantScoreAndXP(e.scoreValue, e.xpValue, e.wx, e.wy)
 								end
 							end
 							break
@@ -1260,11 +1075,6 @@ local function RenderEndlessWorldAndHUD(dt)
 	local halfCols = math.floor(GRID_COLS * 0.5)
 	local halfRows = math.floor(GRID_ROWS * 0.5)
 
-	local currentBiome = GetCurrentBiome()
-	if realmTransitionTimer > 0 then
-		realmTransitionTimer = math.max(0, realmTransitionTimer - dt)
-	end
-
 	for r = 1, GRID_ROWS do
 		for c = 1, GRID_COLS do
 			local gx = centerGX + (c - 1 - halfCols)
@@ -1284,11 +1094,11 @@ local function RenderEndlessWorldAndHUD(dt)
 					cell.feat = feat
 					if feat == "ROAD" then
 						cell.tile:SetImage(Enum.ImageSource.StaticReference, RECT_RES)
-						cell.tile.imageColor = currentBiome.road
+						cell.tile.imageColor = Color.FromRGB(142, 108, 72)
 						cell.tile:SetSizeDelta(CELL_SIZE + 2, CELL_SIZE + 2)
 						cell.tile:SetVisible(true)
 
-						cell.brickMortar.imageColor = currentBiome.mortar
+						cell.brickMortar.imageColor = Color.FromRGB(115, 84, 52)
 						cell.brickMortar:SetVisible(true)
 
 						cell.trunk:SetVisible(false)
@@ -1296,9 +1106,9 @@ local function RenderEndlessWorldAndHUD(dt)
 						cell.canopyTop:SetVisible(false)
 
 					elseif feat == "TREE" then
-						-- Dark moss/spore patch under tree + Trunk + Two-Tone Canopy
+						-- Dark moss patch under tree + Trunk + Two-Tone Pixel Canopy
 						cell.tile:SetImage(Enum.ImageSource.StaticReference, CIRCLE_RES)
-						cell.tile.imageColor = currentBiome.treePatch
+						cell.tile.imageColor = Color.FromRGBA(78, 112, 54, 185)
 						cell.tile:SetSizeDelta(64, 42)
 						cell.tile:SetVisible(true)
 						cell.brickMortar:SetVisible(false)
@@ -1309,7 +1119,7 @@ local function RenderEndlessWorldAndHUD(dt)
 
 					elseif feat == "MOSS" then
 						cell.tile:SetImage(Enum.ImageSource.StaticReference, CIRCLE_RES)
-						cell.tile.imageColor = currentBiome.moss
+						cell.tile.imageColor = Color.FromRGBA(82, 118, 56, 165)
 						cell.tile:SetSizeDelta(68, 48)
 						cell.tile:SetVisible(true)
 						cell.brickMortar:SetVisible(false)
@@ -1319,7 +1129,7 @@ local function RenderEndlessWorldAndHUD(dt)
 
 					elseif feat == "FLOWER" then
 						cell.tile:SetImage(Enum.ImageSource.StaticReference, STAR4_RES)
-						cell.tile.imageColor = currentBiome.flower
+						cell.tile.imageColor = Color.FromRGB(250, 250, 235)
 						cell.tile:SetSizeDelta(16, 16)
 						cell.tile:SetVisible(true)
 						cell.brickMortar:SetVisible(false)
@@ -1427,16 +1237,16 @@ local function RenderEndlessWorldAndHUD(dt)
 	end
 
 	-- 8. Update HUD Bars & Boss Quest Tracker
-	local scorePct = Clamp(realmProgressScore / math.max(1, targetBossScore), 0, 1)
+	local scorePct = Clamp(mage.score / TARGET_BOSS_SCORE, 0, 1)
 	scoreBarFill:SetSizeDelta(math.max(4, scorePct * 412), 12)
-	scoreText.text = string.format("SCORE: %d (BEST: %d)  |  BOSS SUMMON: %d/%d (%d%%)",
-		mage.score, bestScore, realmProgressScore, targetBossScore, math.floor(scorePct * 100))
+	scoreText.text = string.format("REALM FAME SCORE: %d / %d (%d%% TO BOSS)",
+		mage.score, TARGET_BOSS_SCORE, math.floor(scorePct * 100))
 
 	if bossSpawned and bossEntity and bossEntity.active then
 		local bRatio = Clamp(bossEntity.hp / math.max(1, bossEntity.maxHp), 0, 1)
 		bossHpFill:SetSizeDelta(math.max(4, bRatio * 412), 12)
-		bossHpText.text = string.format("☠ %s (LV.%d) — HP: %d / %d ☠",
-			currentBiome.bossTitle, bossEntity.enemyLv or realmTier, math.floor(bossEntity.hp), bossEntity.maxHp)
+		bossHpText.text = string.format("☠ ORYX, ARCHON OF THE MAD REALM — HP: %d / %d ☠",
+			math.floor(bossEntity.hp), bossEntity.maxHp)
 
 		-- Point Quest Arrow toward Boss if off-center
 		local bdx = bossEntity.wx - mage.wx
@@ -1452,24 +1262,21 @@ local function RenderEndlessWorldAndHUD(dt)
 		questArrow:SetVisible(false)
 	end
 
-	if gameState == "DEFEAT" then
-		questBannerText.text = string.format("☠ YOU FELL IN REALM %d (%s)! SCORE: %d | REALMS CLEARED: %d (PRESS [R] TO REBORN) ☠",
-			realmTier, currentBiome.name, mage.score, realmsCleared)
+	if gameState == "VICTORY" then
+		questBannerText.text = "★ REALM CONQUERED! YOU DEFEATED THE MAD GOD! (PRESS [R] TO NEW REALM) ★"
+		questBannerText.fontColor = Color.FromRGB(115, 250, 145)
+	elseif gameState == "DEFEAT" then
+		questBannerText.text = "☠ YOU FELL IN THE REALM! SCORE: " .. mage.score .. " (PRESS [R] TO REBORN) ☠"
 		questBannerText.fontColor = Color.FromRGB(255, 85, 85)
-	elseif realmTransitionTimer > 0 then
-		questBannerText.text = string.format("★ BOSS SLAIN! WARPED TO REALM %d: %s • ENEMIES LV.%d (HP & ATK UP!) ★",
-			realmTier, currentBiome.name, GetEnemyRealmLevel())
-		questBannerText.fontColor = currentBiome.bannerCol
 	elseif bossSpawned then
-		questBannerText.text = string.format("⚔ REALM %d BOSS: SLAY %s! (FOLLOW GOLD ARROW) ⚔",
-			realmTier, currentBiome.bossTitle)
+		questBannerText.text = "⚔ QUEST: SLAY ORYX, ARCHON OF THE MAD REALM! (FOLLOW GOLD ARROW) ⚔"
 		questBannerText.fontColor = Color.FromRGB(255, 110, 95)
 	else
 		questBannerText.text = string.format(
-			"REALM %d: %s (ENEMY LV.%d) • SURVIVE & SLAY TO SUMMON BOSS!",
-			realmTier, currentBiome.name, GetEnemyRealmLevel()
+			"ROAM ENDLESS REALM (X:%dm, Y:%dm) • SLAY MONSTERS TO FILL SCORE BAR & SUMMON BOSS!",
+			math.floor(mage.wx / 10), math.floor(mage.wy / 10)
 		)
-		questBannerText.fontColor = currentBiome.bannerCol
+		questBannerText.fontColor = Color.FromRGB(235, 205, 115)
 	end
 
 	mageHpFill:SetSizeDelta(math.max(4, (mage.hp / mage.maxHp) * 196), 12)
@@ -1479,8 +1286,8 @@ local function RenderEndlessWorldAndHUD(dt)
 	mageMpFill:SetSizeDelta(math.max(4, mpRatio * 196), 12)
 	mageMpText.text = string.format("MP: %d / %d [SPACE: SPELLBOMB]", math.floor(mage.mp), mage.maxMp)
 
-	mageStatsText.text = string.format("WIZARD LV.%d  |  DMG: %d  |  REALM %d (%d CLEARED)  |  SCORE: %d  |  AUTO-FIRE [F]: %s",
-		mage.level, mage.staffDamage, realmTier, realmsCleared, mage.score, autoFireEnabled and "ON" or "OFF")
+	mageStatsText.text = string.format("WIZARD LV.%d  |  STAFF DMG: %d  |  AUTO-FIRE [F]: %s",
+		mage.level, mage.staffDamage, autoFireEnabled and "ON" or "OFF")
 end
 
 -- ============================================================================
@@ -1563,20 +1370,11 @@ local function ResetRealm()
 	mage.staffDamage = 24
 	mage.fireRate = 5.2
 
-	realmTier = 1
-	realmsCleared = 0
-	realmProgressScore = 0
-	targetBossScore = TARGET_BOSS_SCORE
-	realmTransitionTimer = 0
 	bossSpawned = false
 	bossEntity = nil
 	gameState = "PLAYING"
-	ApplyBiomePalette()
 	if bossHpContainer then
 		bossHpContainer:SetVisible(false)
-	end
-	for _ = 1, 8 do
-		SpawnRealmMonster()
 	end
 end
 

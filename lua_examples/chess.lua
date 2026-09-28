@@ -14,9 +14,9 @@ local RECTANGLE_ASSET = 100001
 local CIRCLE_ASSET = 100002
 local HOLLOW_CIRCLE_ASSET = 100006
 
-local BOT_THINK_DELAY = 0.08        -- Near-instant bot response after White's move renders
-local BOT_RANDOM_MOVE_CHANCE = 0.35 -- ~250 ELO blend of tactical search + novice randomness
-local BOT_EVAL_NOISE = 140          -- Centipawn jitter for 250 ELO personality
+local BOT_THINK_DELAY_MIN = 0.48    -- Human-like read & search pause (min seconds)
+local BOT_THINK_DELAY_MAX = 0.82    -- Human-like read & search pause (max seconds)
+local BOT_EVAL_NOISE = 26           -- Small tie-breaker jitter so games vary without blundering free pieces
 
 local DESIGN_WIDTH = 960
 local DESIGN_HEIGHT = 640
@@ -43,16 +43,19 @@ local gameOver = false
 local inCheckColor = nil
 local enPassantTarget = nil -- { file = number, rank = number, pawn = piece }
 local lastMove = nil        -- { fromFile, fromRank, toFile, toRank }
+local lastBlackPieceMoved = nil
 local botTimer = 0
 
 local boardLeft = 0
 local boardBottom = 0
 local boardSize = 0
 local squareSize = 0
+local pieceShadowOffsetY = 2.2
 
 local files = { "A", "B", "C", "D", "E", "F", "G", "H" }
+-- Use solid 'black' UTF chess glyphs for both sides and paint White pieces in white
 local pieceGlyphs = {
-	white = { P = "♙", R = "♖", N = "♘", B = "♗", Q = "♕", K = "♔" },
+	white = { P = "♟", R = "♜", N = "♞", B = "♝", Q = "♛", K = "♚" },
 	black = { P = "♟", R = "♜", N = "♞", B = "♝", Q = "♛", K = "♚" }
 }
 
@@ -78,14 +81,16 @@ local ALL_DR = { 0, 0, 1, -1, 1, -1, 1, -1 }
 -- Colors (cached once to avoid runtime allocations)
 local COLOR_LIGHT_SQ = Color(238, 217, 181, 255)
 local COLOR_DARK_SQ = Color(181, 136, 99, 255)
-local COLOR_LAST_MOVE_LIGHT = Color(218, 208, 115, 255)
-local COLOR_LAST_MOVE_DARK = Color(178, 162, 74, 255)
-local COLOR_SELECTED_SQ = Color(230, 190, 55, 255)
-local COLOR_CHECK_SQ = Color(215, 55, 55, 255)
-local COLOR_MOVE_DOT = Color(32, 42, 36, 155)
-local COLOR_CAPTURE_RING = Color(205, 45, 45, 195)
-local COLOR_WHITE_PIECE = Color(250, 248, 242, 255)
-local COLOR_BLACK_PIECE = Color(28, 25, 22, 255)
+local COLOR_LAST_MOVE_LIGHT = Color(224, 210, 138, 255)
+local COLOR_LAST_MOVE_DARK = Color(178, 158, 88, 255)
+local COLOR_SELECTED_SQ = Color(214, 186, 92, 255)
+local COLOR_CHECK_SQ = Color(205, 68, 62, 255)
+local COLOR_MOVE_DOT = Color(28, 24, 20, 51)        -- ~20% opacity so pieces stand out
+local COLOR_CAPTURE_RING = Color(182, 54, 48, 76)   -- ~30% opacity subtle capture ring
+local COLOR_WHITE_PIECE = Color(248, 245, 238, 255)
+local COLOR_BLACK_PIECE = Color(66, 47, 34, 255)     -- Coffee color (matching board edge aesthetic)
+local COLOR_PIECE_OUTLINE = Color(16, 11, 7, 255)    -- Dark outline around both White and Black pieces
+local COLOR_SOFT_SHADOW_BELOW = Color(14, 10, 7, 90) -- Soft contact shadow directly hugging piece base
 local COLOR_TRANSPARENT = Color(0, 0, 0, 0)
 local COLOR_HUD_GOLD = Color(238, 217, 171, 255)
 local COLOR_HUD_MUTED = Color(185, 165, 130, 255)
@@ -404,11 +409,84 @@ local function GenerateAllLegalMoves(color)
 end
 
 -- ============================================================================
--- ULTRA-FAST ~250 ELO BLACK BOT ENGINE
+-- DOPAMINE-DRIVEN ROOKIE MENACE BOT ENGINE (~250 ELO)
 -- Designed for Miliastra Wonderland's per-frame Lua VM instruction budget:
--- Evaluates all legal Black moves + 2-ply tactical threat/hang detection in
--- < 1,200 instructions (zero recursive move-tree explosion).
+-- Evaluates all legal Black moves + 2-ply threat/capture/development heuristics
+-- in < 1,500 instructions (zero recursive move-tree explosion).
+-- Personality:
+--   • Snaps up free (undefended) pieces and winning trades immediately
+--   • Craves dopamine from Checks, attacking White pieces, and multi-target forks
+--   • Develops its unmoved Knights & Bishops into the fight instead of marching one pawn
 -- ============================================================================
+
+-- Fast zero-allocation scan of White pieces threatened by `piece` from (f, r)
+local function EvaluateBlackPieceThreats(piece, f, r, myVal)
+	local threatScore = 0
+	local threatCount = 0
+	local kind = piece.kind
+
+	local function scoreTarget(target)
+		if target and target.color == "white" and target.kind ~= "K" then
+			local tVal = pieceValues[target.kind] or 100
+			threatCount = threatCount + 1
+			local targetDefended = IsSquareAttacked(target.file, target.rank, "white")
+			if not targetDefended then
+				-- Attacking an undefended (loose) White piece = big menace dopamine
+				threatScore = threatScore + math.floor(tVal * 0.42) + 75
+			elseif tVal > myVal then
+				-- Attacking a higher-value defended piece (e.g. Pawn/Knight attacks Queen/Rook)
+				threatScore = threatScore + math.floor((tVal - myVal) * 0.36) + 80
+			else
+				-- General pressure threat
+				threatScore = threatScore + 34
+			end
+		end
+	end
+
+	if kind == "P" then
+		local nr = r - 1
+		if nr >= 1 then
+			if f > 1 then scoreTarget(boardGrid[nr][f - 1]) end
+			if f < 8 then scoreTarget(boardGrid[nr][f + 1]) end
+		end
+	elseif kind == "N" then
+		for i = 1, 8 do
+			local nf, nr = f + KNIGHT_DF[i], r + KNIGHT_DR[i]
+			if nf >= 1 and nf <= 8 and nr >= 1 and nr <= 8 then
+				scoreTarget(boardGrid[nr][nf])
+			end
+		end
+	elseif kind == "B" or kind == "R" or kind == "Q" then
+		local startIdx = (kind == "B") and 5 or 1
+		local endIdx = (kind == "R") and 4 or 8
+		for i = startIdx, endIdx do
+			local df, dr = ALL_DF[i], ALL_DR[i]
+			local nf, nr = f + df, r + dr
+			while nf >= 1 and nf <= 8 and nr >= 1 and nr <= 8 do
+				local p = boardGrid[nr][nf]
+				if p then
+					scoreTarget(p)
+					break
+				end
+				nf = nf + df
+				nr = nr + dr
+			end
+		end
+	elseif kind == "K" then
+		for i = 1, 8 do
+			local nf, nr = f + ALL_DF[i], r + ALL_DR[i]
+			if nf >= 1 and nf <= 8 and nr >= 1 and nr <= 8 then
+				scoreTarget(boardGrid[nr][nf])
+			end
+		end
+	end
+
+	-- Fork bonus: threatening 2+ White pieces simultaneously
+	if threatCount >= 2 then
+		threatScore = threatScore + 110
+	end
+	return threatScore, threatCount
+end
 
 local function ChooseBotMove()
 	local legalMoves = GenerateAllLegalMoves("black")
@@ -420,9 +498,13 @@ local function ChooseBotMove()
 		return legalMoves[1]
 	end
 
-	-- 250 ELO Novice Bot: 35% chance to play a spontaneous legal move
-	if math.random() < BOT_RANDOM_MOVE_CHANCE then
-		return legalMoves[math.random(1, moveCount)]
+	-- Count how many Black minor pieces (Knights & Bishops) are still undeployed on rank 8
+	local undeployedMinors = 0
+	for i = 1, #pieces do
+		local p = pieces[i]
+		if p.alive and p.color == "black" and (p.kind == "N" or p.kind == "B") and not p.hasMoved then
+			undeployedMinors = undeployedMinors + 1
+		end
 	end
 
 	local bestMove = legalMoves[1]
@@ -431,36 +513,20 @@ local function ChooseBotMove()
 	for i = 1, moveCount do
 		local move = legalMoves[i]
 		local piece = move.piece
+		local kind = piece.kind
 		local fromF, fromR = move.fromFile, move.fromRank
 		local toF, toR = move.toFile, move.toRank
 		local captured = boardGrid[toR][toF]
 		local epPawn = move.isEnPassant and move.epPawn or nil
+		local myVal = move.promotion and 900 or (pieceValues[kind] or 100)
 
 		local score = 0
 
-		-- 1. Material capture gain
-		if captured then
-			score = score + (pieceValues[captured.kind] or 100)
-		elseif epPawn then
-			score = score + 100
-		end
+		-- Check if this piece is currently under attack on its starting square
+		local wasUnderAttack = IsSquareAttacked(fromF, fromR, "white")
+		local preThreatScore = EvaluateBlackPieceThreats(piece, fromF, fromR, myVal)
 
-		-- 2. Promotion & Castling bonuses
-		if move.promotion then
-			score = score + 800
-		elseif move.isCastle then
-			score = score + 65
-		end
-
-		-- 3. Center control & piece development heuristic
-		local centerBefore = math.abs(fromF - 4.5) + math.abs(fromR - 4.5)
-		local centerAfter = math.abs(toF - 4.5) + math.abs(toR - 4.5)
-		score = score + math.floor((centerBefore - centerAfter) * 6)
-		if piece.kind == "P" then
-			score = score + (fromR - toR) * 8
-		end
-
-		-- 4. Simulate move in-place to check 2-ply tactical threats (Checks & Hanging Pieces)
+		-- Simulate move in-place on boardGrid to inspect captures, checks, threats, and safety
 		boardGrid[fromR][fromF] = nil
 		if epPawn then
 			boardGrid[epPawn.rank][epPawn.file] = nil
@@ -472,16 +538,121 @@ local function ChooseBotMove()
 		piece.file = toF
 		piece.rank = toR
 
-		-- Does this move give Check to White's King?
-		if whiteKing and IsSquareAttacked(whiteKing.file, whiteKing.rank, "black") then
-			score = score + 45
+		local destAttackedByWhite = IsSquareAttacked(toF, toR, "white")
+		local destDefendedByBlack = IsSquareAttacked(toF, toR, "black")
+		local givesCheck = whiteKing and IsSquareAttacked(whiteKing.file, whiteKing.rank, "black") or false
+		local postThreatScore, postThreatCount = EvaluateBlackPieceThreats(piece, toF, toR, myVal)
+		local newThreatGain = math.max(0, postThreatScore - preThreatScore)
+
+		-- 1. TAKING PIECES (Top Dopamine Priority: Free pieces & favorable/equal trades)
+		local capturedVal = 0
+		if captured then
+			capturedVal = pieceValues[captured.kind] or 100
+		elseif epPawn then
+			capturedVal = 100
 		end
 
-		-- 2-ply tactical lookahead: Is the moved piece walking onto a square attacked by White?
-		if IsSquareAttacked(toF, toR, "white") then
-			local myVal = move.promotion and 900 or (pieceValues[piece.kind] or 100)
-			-- Penalize hanging high-value pieces into defended squares
-			score = score - math.floor(myVal * 0.75)
+		if capturedVal > 0 then
+			if not destAttackedByWhite then
+				-- FREE PIECE! Undefended capture: always snap it up
+				score = score + math.floor(capturedVal * 3.4) + 260
+			elseif capturedVal > myVal then
+				-- Winning trade (e.g. Pawn takes Knight, or Knight takes Rook/Queen)
+				score = score + math.floor((capturedVal - myVal) * 2.6) + 195
+			elseif capturedVal == myVal then
+				-- Equal trade: rookie menace loves trading off pieces
+				score = score + math.floor(capturedVal * 1.15) + 70
+			else
+				-- Bad trade (capturing a defended lower-value piece with a bigger piece)
+				score = score - math.floor((myVal - capturedVal) * 1.65)
+			end
+		else
+			-- Non-capture safety check: don't carelessly hang pieces for nothing
+			if destAttackedByWhite then
+				if destDefendedByBlack then
+					score = score - math.floor(myVal * 0.95)
+				else
+					score = score - math.floor(myVal * 1.55)
+				end
+			elseif wasUnderAttack then
+				-- Saving an attacked piece by moving it to a safe square
+				score = score + math.floor(myVal * 0.85) + 45
+			end
+		end
+
+		-- 2. CHECKS & THREATS (Menace Dopamine)
+		if givesCheck then
+			if not destAttackedByWhite then
+				-- Safe Check = huge rookie dopamine!
+				score = score + 185
+			elseif destDefendedByBlack and myVal <= 315 then
+				score = score + 55
+			else
+				-- Avoid suiciding the Queen/Rook just for a 1-move check
+				score = score - 60
+			end
+		end
+
+		if not destAttackedByWhite then
+			score = score + newThreatGain
+		else
+			score = score + math.floor(newThreatGain * 0.25)
+		end
+
+		-- 3. PROMOTION & CASTLING
+		if move.promotion then
+			score = score + 850
+		elseif move.isCastle then
+			score = score + 135
+		end
+
+		-- 4. PIECE DEVELOPMENT vs ANTI-PAWN-MARCH
+		local centerBefore = math.abs(fromF - 4.5) + math.abs(fromR - 4.5)
+		local centerAfter = math.abs(toF - 4.5) + math.abs(toR - 4.5)
+
+		if kind == "N" or kind == "B" then
+			if not piece.hasMoved then
+				-- Strong incentive to develop Knights & Bishops off the back rank
+				score = score + 115 + math.floor((centerBefore - centerAfter) * 12)
+			else
+				score = score + math.floor((centerBefore - centerAfter) * 6)
+			end
+		elseif kind == "P" then
+			if not piece.hasMoved then
+				-- Develop center pawns (C/D/E/F) to open lines for Bishops & Queen
+				if fromF >= 3 and fromF <= 6 then
+					score = score + 46 + (fromR - toR) * 10
+				else
+					-- Discourage random edge-pawn pushes unless making a capture/threat
+					score = score - 18
+				end
+			else
+				-- Already-moved pawn: don't mindlessly march one pawn unless it captures, threatens, or promotes
+				if capturedVal == 0 and postThreatCount == 0 and toR > 2 then
+					score = score - 52
+				else
+					score = score + (8 - toR) * 6
+				end
+			end
+		elseif kind == "Q" then
+			if undeployedMinors >= 3 and not piece.hasMoved and capturedVal == 0 then
+				-- Prefer developing at least a couple of minor pieces before bringing Queen out on empty squares
+				score = score - 35
+			else
+				score = score + math.floor((centerBefore - centerAfter) * 5)
+			end
+		elseif kind == "R" then
+			if undeployedMinors >= 2 and not piece.hasMoved and capturedVal == 0 then
+				score = score - 30
+			end
+		elseif kind == "K" and not move.isCastle and capturedVal == 0 then
+			-- Don't randomly walk the King out in the opening
+			score = score - 110
+		end
+
+		-- Discourage moving the exact same piece twice in a row unless capturing, checking, or escaping attack
+		if piece == lastBlackPieceMoved and capturedVal == 0 and not givesCheck and not wasUnderAttack then
+			score = score - 68
 		end
 
 		-- Restore board state
@@ -496,7 +667,7 @@ local function ChooseBotMove()
 			captured.alive = true
 		end
 
-		-- 5. Add 250-ELO evaluation jitter so moves feel natural and varied
+		-- Small tie-breaker jitter so games stay fresh without blundering
 		score = score + math.random(-BOT_EVAL_NOISE, BOT_EVAL_NOISE)
 
 		if score > bestScore then
@@ -558,6 +729,7 @@ local function ConfigureBoardGeometry()
 	squareSize = boardSize / 8
 	boardLeft = (screenWidth - boardSize) * 0.5
 	boardBottom = (screenHeight - boardSize) * 0.46
+	pieceShadowOffsetY = math.max(1.4, squareSize * 0.032)
 end
 
 local function GetBoardSquare(eventData)
@@ -590,7 +762,7 @@ local function RenderMoveDots()
 				indicator.imageColor = COLOR_CAPTURE_RING
 			else
 				indicator:SetImage(Enum.ImageSource.StaticReference, CIRCLE_ASSET)
-				indicator:SetSizeDelta(squareSize * 0.32, squareSize * 0.32)
+				indicator:SetSizeDelta(squareSize * 0.30, squareSize * 0.30)
 				indicator.imageColor = COLOR_MOVE_DOT
 			end
 			indicator:SetVisible(true)
@@ -634,17 +806,38 @@ local function RenderSquaresAndPieces()
 		end
 	end
 
-	-- 2. Update piece glyph positions
+	-- 2. Update piece glyph, dark outline, and soft shadow below the piece
 	for i = 1, #pieces do
 		local piece = pieces[i]
 		local control = piece.control
+		local baseShadow = piece.baseShadow
+		local dropShadow = piece.dropShadow
 		if piece.alive then
 			local x = boardLeft + (piece.file - 0.5) * squareSize
 			local y = boardBottom + (piece.rank - 0.5) * squareSize
+			local glyph = pieceGlyphs[piece.color][piece.kind]
+			if baseShadow then
+				local shadowW = piece.kind == "P" and (squareSize * 0.36) or (squareSize * 0.44)
+				baseShadow:SetSizeDelta(shadowW, squareSize * 0.11)
+				baseShadow:SetAnchoredPosition(x, y - squareSize * 0.155)
+				baseShadow:SetVisible(true)
+			end
+			if dropShadow then
+				dropShadow:SetAnchoredPosition(x, y - pieceShadowOffsetY)
+				dropShadow.text = glyph
+			end
 			control:SetAnchoredPosition(x, y)
-			control.text = pieceGlyphs[piece.color][piece.kind]
+			control.text = glyph
 			control.fontColor = piece.color == "white" and COLOR_WHITE_PIECE or COLOR_BLACK_PIECE
+			control.enableOutline = true
+			control.outlineColor = COLOR_PIECE_OUTLINE
 		else
+			if baseShadow then
+				baseShadow:SetVisible(false)
+			end
+			if dropShadow then
+				dropShadow.text = ""
+			end
 			control.text = ""
 		end
 	end
@@ -766,6 +959,10 @@ local function ExecuteMove(move)
 	local moveColor = move.piece.color
 	local moveDesc = (moveColor == "white" and "White " or "Bot ") .. DescribeMove(move)
 
+	if moveColor == "black" then
+		lastBlackPieceMoved = move.piece
+	end
+
 	ApplyPermanentMove(move)
 
 	lastMove = {
@@ -782,7 +979,7 @@ local function ExecuteMove(move)
 	RenderSquaresAndPieces()
 
 	if not gameOver and currentTurn == "black" then
-		botTimer = BOT_THINK_DELAY
+		botTimer = BOT_THINK_DELAY_MIN + math.random() * (BOT_THINK_DELAY_MAX - BOT_THINK_DELAY_MIN)
 	end
 	script:EnableUpdate(true)
 end
@@ -821,6 +1018,7 @@ local function ResetGame()
 	inCheckColor = nil
 	enPassantTarget = nil
 	lastMove = nil
+	lastBlackPieceMoved = nil
 	botTimer = 0
 	script:EnableUpdate(true)
 
@@ -951,15 +1149,41 @@ local function CreateBoardVisuals()
 end
 
 local function AddPiece(color, kind, file, rank)
-	local control = game.InstantiateClientUIControl(TEXTBOX_TEMPLATE, boardControl)
 	local x = boardLeft + (file - 0.5) * squareSize
 	local y = boardBottom + (rank - 0.5) * squareSize
 	local name = (color == "white" and "White_" or "Black_") .. kind .. "_" .. files[file] .. tostring(rank)
-	SetText(control, x, y, squareSize, squareSize, pieceGlyphs[color][kind],
-		math.floor(squareSize * 0.68), color == "white" and COLOR_WHITE_PIECE or COLOR_BLACK_PIECE, name)
+	local fontSize = math.floor(squareSize * 0.68)
+	local glyph = pieceGlyphs[color][kind]
+
+	-- Soft elliptical contact shadow directly hugging the base of the piece
+	local baseShadow = game.InstantiateClientUIControl(IMAGE_TEMPLATE, boardControl)
+	baseShadow.name = name .. "_BaseShadow"
+	baseShadow:SetAnchorMin(0, 0)
+	baseShadow:SetAnchorMax(0, 0)
+	baseShadow:SetPivot(0.5, 0.5)
+	baseShadow:SetAnchoredPosition(x, y - squareSize * 0.155)
+	local shadowW = kind == "P" and (squareSize * 0.36) or (squareSize * 0.44)
+	baseShadow:SetSizeDelta(shadowW, squareSize * 0.11)
+	baseShadow:SetImage(Enum.ImageSource.StaticReference, CIRCLE_ASSET)
+	baseShadow.enableSoftEdge = true
+	baseShadow.imageColor = COLOR_SOFT_SHADOW_BELOW
+
+	-- Soft downward glyph shadow directly below the piece (both White & Black)
+	local dropShadow = game.InstantiateClientUIControl(TEXTBOX_TEMPLATE, boardControl)
+	SetText(dropShadow, x, y - pieceShadowOffsetY, squareSize, squareSize, glyph,
+		fontSize, COLOR_SOFT_SHADOW_BELOW, name .. "_DropShadow")
+
+	-- Main piece foreground glyph (with dark outline enabled for both White and Black pieces)
+	local control = game.InstantiateClientUIControl(TEXTBOX_TEMPLATE, boardControl)
+	SetText(control, x, y, squareSize, squareSize, glyph,
+		fontSize, color == "white" and COLOR_WHITE_PIECE or COLOR_BLACK_PIECE, name)
+	control.enableOutline = true
+	control.outlineColor = COLOR_PIECE_OUTLINE
 
 	local piece = {
 		control = control,
+		baseShadow = baseShadow,
+		dropShadow = dropShadow,
 		color = color,
 		kind = kind,
 		file = file,
@@ -984,9 +1208,6 @@ end
 function OnStart()
 	boardControl = script.object
 	RefreshRootScale()
-    boardControl.showCursor = true
-	boardControl.disableKeyEventPassthrough = true
-	boardControl.disableCursorEventPassthrough = true
 
 	ConfigureBoardGeometry()
 	CreateBoardVisuals()

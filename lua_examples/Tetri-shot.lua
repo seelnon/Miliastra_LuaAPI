@@ -475,21 +475,32 @@ end
 -- Board is now 1 thing, not a bunch of pieces, so it is easier to check for collisions and overlaps. It is now a 'painted' board, not a bunch of objects.
 
 local function lockPiece(piece, column, row)
+        while isOccupied(column, row, piece.matrix, false) do
+                row = row - 1
+        end
         while row < BOARD_HEIGHT and not isOccupied(column, row + 1, piece.matrix, false) do
                 row = row + 1
         end
+        local overflowed = false
         for matrixRow = 1, #piece.matrix do
                 for matrixColumn = 1, #piece.matrix[matrixRow] do
                         if piece.matrix[matrixRow][matrixColumn] ~= 0 then
                                 local boardRow = row + matrixRow - 1
                                 local boardColumn = column + matrixColumn - 1
-                                if boardRow >= 1 and boardRow <= BOARD_HEIGHT then
+                                if boardRow < 1 then
+                                        overflowed = true
+                                elseif boardRow <= BOARD_HEIGHT then
                                         grid[boardRow][boardColumn] = piece.type
                                 end
                         end
                 end
         end
         boardDirty = true
+        if overflowed then
+                gameOver = true
+                hudDirty = true
+                ghostDirty = true
+        end
 end
 
 local function clearLines()
@@ -691,6 +702,13 @@ findNearbyPlacement = function(piece, targetX, targetY)
                                         bestY = candidateY
                                         bestDistance = candidateDistance
                                 end
+                        end
+                end
+        end
+        if not bestX and targetY <= 2 then
+                for overflowY = 0, -#piece.matrix, -1 do
+                        if not isOccupied(targetX, overflowY, piece.matrix, true) then
+                                return targetX, overflowY
                         end
                 end
         end
@@ -915,11 +933,15 @@ function OnUpdate(deltaTime)
                 local dump = table.remove(nextPieces, 1)
                 dump.x = math.random(1, BOARD_WIDTH - #dump.matrix[1] + 1)
                 dump.y = 1
-                table.insert(activePieces, dump)
-                table.insert(nextPieces, newPiece())
+                table.insert( nextPieces, newPiece() )
                 panicTimer = panicInterval
                 boardDirty = true
                 nextPiecesDirty = true
+                if isOccupied(dump.x, 1, dump.matrix, false) then
+                        lockPiece(dump, dump.x, 1)
+                else
+                        table.insert(activePieces, dump)
+                end
         end
         if fallTimer < getFallInterval() then
                 redraw()
@@ -928,27 +950,22 @@ function OnUpdate(deltaTime)
         fallTimer = 0
         for index = #activePieces, 1, -1 do
                 local active = activePieces[index]
-                if isOccupied(active.x, math.floor(active.y) + 1, active.matrix, false) then
-                        lockPiece(active, active.x, math.floor(active.y))
+                local curY = math.floor(active.y)
+                if isOccupied(active.x, curY, active.matrix, false) or isOccupied(active.x, curY + 1, active.matrix, false) then
+                        lockPiece(active, active.x, curY)
                         table.remove(activePieces, index)
-                        local cleared = clearLines()
-                        triggerShake(cleared > 0 and 7 or 2)
-                        if cleared == 4 then
-                                tetrisTimer = 1.5
+                        if not gameOver then
+                                local cleared = clearLines()
+                                triggerShake(cleared > 0 and 7 or 2)
+                                if cleared == 4 then
+                                        tetrisTimer = 1.5
+                                end
+                                spawnParticles(active.x, math.max(1, curY), active.matrix, colors[active.type], cleared == 4 and 16 or 8)
                         end
-                        spawnParticles(active.x, math.floor(active.y), active.matrix, colors[active.type], cleared == 4 and 16 or 8)
                         boardDirty = true
-                elseif not isOccupied(active.x, math.floor(active.y) + 1, active.matrix, true, active) then
+                elseif not isOccupied(active.x, curY + 1, active.matrix, true, active) then
                         active.y = active.y + 1
                         boardDirty = true
-                end
-        end
-        for column = 1, BOARD_WIDTH do
-                if grid[1][column] then
-                        gameOver = true
-                        hudDirty = true
-                        ghostDirty = true
-                        break
                 end
         end
         redraw()
