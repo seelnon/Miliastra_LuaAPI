@@ -329,6 +329,11 @@ class MiliastraCodexApp {
       // Field Accordion Header Toggle
       const fieldHeader = e.target.closest('.field-accordion-header');
       if (fieldHeader) {
+        const clickedToggleIcon = Boolean(e.target.closest('.field-toggle-icon'));
+        const activeSelection = window.getSelection ? window.getSelection().toString().trim() : '';
+        if (!clickedToggleIcon && activeSelection.length > 0) {
+          return;
+        }
         const item = fieldHeader.closest('.field-accordion-item');
         if (item) {
           const body = item.querySelector('.field-accordion-body');
@@ -351,6 +356,11 @@ class MiliastraCodexApp {
       // Method Accordion Header Toggle
       const methodHeader = e.target.closest('.method-accordion-header');
       if (methodHeader) {
+        const clickedToggleIcon = Boolean(e.target.closest('.method-toggle-icon'));
+        const activeSelection = window.getSelection ? window.getSelection().toString().trim() : '';
+        if (!clickedToggleIcon && activeSelection.length > 0) {
+          return;
+        }
         const item = methodHeader.closest('.method-accordion-item');
         if (item) {
           const body = item.querySelector('.method-accordion-body');

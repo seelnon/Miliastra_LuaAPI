@@ -5,81 +5,107 @@
 -- ============================================================================
 --
 -- [CRITICAL MILIASTRA ENGINE RULES & IN-GAME VERIFIED GUARDRAILS]
--- 1. PROJECT-SPECIFIC TEMPLATE IDs:
---    Miliastra automatically generates Template IDs (prefabIndex) per project.
---    Always define your project's Template IDs at the top of your script.
+-- 1. STANDARD RESOLUTION (1280 x 720 HD GOLDEN RATIO):
+--    * Standardize on `local DESIGN_WIDTH = 1280, local DESIGN_HEIGHT = 720` (16:9 HD).
+--    * Clean integer scaling on 1080p (1.5x), 1440p (2.0x), 4K (3.0x), and mobile viewports.
+--    * Center-anchored container scaling:
+--        rootScale = math.min(vw / DESIGN_WIDTH, vh / DESIGN_HEIGHT)
+--        root:SetAnchorMin(0.5, 0.5); root:SetAnchorMax(0.5, 0.5)
+--        root:SetPivot(0.5, 0.5);     root:SetAnchoredPosition(0, 0)
+--        root:SetSizeDelta(DESIGN_WIDTH, DESIGN_HEIGHT)
+--        root:SetLocalScale(rootScale, rootScale, 1)
+--    * Cursor unprojection to local 1280x720 coordinates:
+--        local lx = DESIGN_WIDTH * 0.5 + (rawX - vw * 0.5) / rootScale
+--        local ly = DESIGN_HEIGHT * 0.5 + (rawY - vh * 0.5) / rootScale
 --
--- 2. STATIC REFERENCE IMAGE ASSETS (Enum.ImageSource.StaticReference):
---    100001 = Rectangle     | 100002 = Circle        | 100003 = Triangle
---    100004 = 4-Point Star  | 100005 = 5-Point Star  | 100006 = Hollow Circle
+-- 2. PROJECT-SPECIFIC TEMPLATE CONSTANTS & ELIMINATING MAGIC NUMBERS:
+--    * Miliastra automatically generates Template IDs (prefabIndex) per project.
+--    * NEVER sprinkle raw integer literals throughout your functions! Define top-level named constants:
+--        local CONTAINER_TEMPLATE = 1073741851
+--        local TEXT_TEMPLATE      = 1073741852
+--        local IMAGE_TEMPLATE     = 1073741853
+--        local BUTTON_TEMPLATE    = 1073741854
+--        local CURSOR_TEMPLATE    = 1073741869
+--        local KEY_HINT_TEMPLATE  = 1073741858
+--        local RECTANGLE_RESOURCE = 100001
+--        local CIRCLE_RESOURCE    = 100002
+--        local TRIANGLE_RESOURCE  = 100003
+--        local RING_RESOURCE      = 100006
 --
--- 3. STRICT UI CONTROL CAPABILITY MATRIX (DO NOT MIX FIELDS ACROSS TYPES!):
+-- 3. UNIFIED HELPER CONSTRUCTORS (CLEANEST & FASTEST FACTORY PATTERN):
+--    * Configure(control, x, y, width, height, name):
+--        control.name = name
+--        control:SetAnchorMin(0, 0); control:SetAnchorMax(0, 0)
+--        control:SetPivot(0.5, 0.5); control:SetAnchoredPosition(x, y)
+--        control:SetSizeDelta(width, height)
+--        control:SetVisible(true)
+--    * NewImage(parent, name, x, y, width, height, color, resId, softEdge):
+--        Instantiates IMAGE_TEMPLATE, calls Configure, sets Stretch image, color, optional softEdge.
+--    * NewText(parent, name, text, x, y, width, height, size, textColor, bgColor):
+--        Enforces: local fontSize = math.max(12, size or 16)
+--                  local textHeight = math.max(height or 28, fontSize * 2)
+--        Sets alignment, color, fontSize, adaptiveFontSize = false, then .text = text, and :SetAsLastSibling().
+--    * CreateMenuOptionButton(parent, name, x, y, width, height, bgColor, title, subtitle, onClick):
+--        Instantiates BUTTON_TEMPLATE + child Image background + title & subtitle TextBoxes + click listener.
+--
+-- 4. STRICT TEXTBOX ENGINE RULES (PREVENT "Font size limit exceeded"):
+--    * Minimum valid .fontSize in Genshin is 12! Any .fontSize < 12 (e.g. 8, 9, 10, 11)
+--      triggers runtime error: "<script>:<line>: Font size limit exceeded." and causes texts to fail!
+--    * Always clamp: local fontSize = math.max(12, math.min(size or 16, 72))
+--    * Never set .minimumFontSize < 12 (or omit .minimumFontSize entirely when adaptiveFontSize = false).
+--    * Always size the TextBox height to at least math.max(height, fontSize * 2) with SetPivot(0.5, 0.5)
+--      so Genshin's font line-height (~2.0-2.1x fontSize) never vertically overflows or clips.
+--
+-- 5. PERFORMANCE, INSTANT LOADING & ZERO-GC OPTIMIZATION TECH:
+--    * CONTROL INSTANTIATION BUDGET:
+--      - Keep total pre-instantiated UI controls under 250–350 controls!
+--      - Instantiating 1,000+ controls synchronously in OnStart() creates noticeable load/unload stutter.
+--      - Viewport-Culling: Only allocate pool slots for visible on-screen items (e.g. 14x10 grid, not 30x30).
+--    * FIXED-SIZE RING BUFFERS (ZERO ALLOCATION DURING GAMEPLAY):
+--      - For bullets, particles, damage numbers, skidmarks: pre-allocate fixed array of size N in OnStart().
+--      - In OnUpdate(), advance `nextIdx = (nextIdx % N) + 1` and overwrite slot.
+--      - ZERO table.insert() or table.remove() calls in OnUpdate() = ZERO Garbage Collection frame spikes!
+--    * DIRTY-FLAG ENGINE CALLS:
+--      - Check `dx*dx + dy*dy > 0.001` before calling `:SetAnchoredPosition(x, y)`.
+--      - When objects are stationary or idle, 0 UI engine setter calls are dispatched.
+--    * DISABLE PER-FRAME CHILD SCRIPTS:
+--      - `local s = img:GetScriptByPath("Image_Control"); if s then s:EnableUpdate(false) end`
+--
+-- 6. STRICT UI CONTROL CAPABILITY MATRIX (DO NOT MIX FIELDS ACROSS TYPES!):
 --    * ClientUIContainerControl (including root `script.object`):
 --      - HAS NO `.bgColor` AND NO `.imageColor`! Setting `root.bgColor = ...`
 --        crashes in Genshin because `.bgColor` does not exist on Container instances!
---      - To draw a full-screen or container background, spawn a child
---        `ClientUIImageControl` (using asset `100001` Rectangle and `.imageColor`).
---      - For interactive/cursor games, configure the root Container with:
+--      - To draw a background, spawn a child `ClientUIImageControl` (asset `100001` Rectangle).
+--      - For interactive/cursor games, configure root Container with:
 --          root.disableKeyEventPassthrough = true
 --          root.disableCursorEventPassthrough = true
 --          root.showCursor = true
 --    * ClientUIPresetButtonControl:
 --      - HAS NO background color (.bgColor), NO image (.imageColor), NO text (.text)!
---      - To give a button a visual background or label, instantiate a
---        ClientUITextBoxControl (set .bgColor and .text) or ClientUIImageControl,
---        and place/parent the PresetButton over it.
+--      - To give a button a visual background or label, instantiate a child
+--        ClientUIImageControl and ClientUITextBoxControl inside/under the button.
 --    * .interactable (boolean) ONLY EXISTS ON:
 --      - ClientUIPresetButtonControl, ClientUITextWindowControl, ClientUIGridScrollerControl
---      - (DOES NOT EXIST on BaseControl, Container, Image, TextBox, or CursorEventArea!)
 --    * .raycastTarget (boolean) ONLY EXISTS ON:
 --      - ClientUIPresetButtonControl, ClientUICursorEventAreaControl, ClientUIGridScrollerControl
---      - (DOES NOT EXIST on BaseControl, Container, Image, TextBox, or TextWindow!)
---    * :AddCursorEventListener / :RemoveCursorEventListener / :SimulateCursorClick ONLY EXIST ON:
+--    * :AddCursorEventListener ONLY EXISTS ON:
 --      - ClientUIPresetButtonControl and ClientUICursorEventAreaControl
---      - (NEVER call :AddCursorEventListener on ImageControl, TextBoxControl, or ContainerControl!)
 --    * .bgColor (ColorValue) ONLY EXISTS ON:
 --      - ClientUITextBoxControl and ClientUITextWindowControl
---      - (ImageControl uses .imageColor; ContainerControl has NO color property!)
 --    * .visible is [Read] on ClientUIBaseControl:
 --      - Always call control:SetVisible(true / false) to change visibility.
 --
--- 4. LUA 5.3+ MATH & RUNTIME RULES (VERIFIED IN GENSHIN):
---    * NO `math.pow(x, y)`:
---      - Genshin's Miliastra Lua parser/runtime does NOT have `math.pow`!
---      - Always use the native exponentiation operator `^` instead:
---        e.g. `(math.max(0, val) / 285) ^ 1.45` (NEVER `math.pow(...)`).
---    * Deterministic Hashing without Bitwise Overflow:
---      - Prefer trigonometric hashing `local v = math.sin(gx * 127.1 + gy * 311.7 + 19.19) * 43758.5453; return v - math.floor(v)`
---        for procedural 2D worlds so negative/positive coordinates work identically.
+-- 7. LUA 5.3+ MATH & RUNTIME RULES (VERIFIED IN GENSHIN):
+--    * NO `math.pow(x, y)`: Always use the native exponentiation operator `^` (e.g. `val ^ 1.45`).
+--    * Deterministic Hashing: Prefer trigonometric hashing for procedural worlds:
+--        local v = math.sin(gx * 127.1 + gy * 311.7 + 19.19) * 43758.5453; return v - math.floor(v)
 --
--- 5. TEXTBOX CONSTRUCTOR PATTERN (`NewText` VERIFIED IN GENSHIN):
---    * Declare `local fontSize` and `local textHeight = math.max(h, fontSize * 2)`
---      BEFORE configuring the control's rect! If a TextBox height is too small
---      relative to `fontSize` when `adaptiveFontSize = false`, text clips or fails to render.
---    * Set `.fontSize`, `.fontColor`, `.bgColor`, `.adaptiveFontSize = false`,
---      `.horizontalAlignment`, and `.verticalAlignment` BEFORE setting `.text = text or ""`,
---      then explicitly call `lbl:SetVisible(true)` and `lbl:SetAsLastSibling()`.
---
--- 6. NEGATIVE SCALE (`SetLocalScale(-1, 1, 1)`) & TRANSFORM RULES:
---    * Negative scale IS supported in Genshin! Calling `ctrl:SetLocalScale(facing, 1, 1)`
---      with `facing = -1` or `1` on a parent character `ContainerControl` cleanly
---      mirrors all child limb `AnchoredPosition` and `LocalRotation` transforms.
---    * Anchor interpolation (`BaseControl.d.lua`):
---      - If `anchorMin == anchorMax` on an axis, the anchor point resolves to `anchorMin`.
---      - If `anchorMin ~= anchorMax` on an axis, the anchor point is interpolated between
---        `anchorMin` and `anchorMax` based on the control's `pivot` percentage (`pivotX`/`pivotY`).
---    * Sibling Order Lifecycle (`SetSiblingIndex`, `SetAsFirstSibling`, `SetAsLastSibling`):
---      - Higher-index siblings render on top of lower-index siblings.
---      - Throws an error if called BEFORE `OnStart` or DURING `OnDestroy`!
---      - Returns `false` when called on a root-level `ContainerControl`.
---
--- 7. KEYBOARD / MOUSE ACTION BINDINGS (`Shift == RMB` SPRINT RULE):
---    * Miliastra binds `Enum.KeyEventType.KeyboardSprintKeyDown` / `Up` to Genshin's
---      semantic **Sprint** action, NOT raw hardware scancodes!
---    * Because Genshin binds Sprint to BOTH **Left Shift** and **Right Mouse Button (RMB)**,
---      `Left Shift` and `RMB` ALWAYS trigger the exact same event (`KeyboardSprintKeyDown`).
---    * NEVER assign Left Shift and RMB to two different game mechanics! Treat Sprint
---      (`Shift / RMB`) as one unified action, and use distinct skill keys for other actions:
+-- 8. KEYBOARD / MOUSE ACTION BINDINGS (`Shift == RMB` SPRINT RULE):
+--    * Miliastra binds `Enum.KeyEventType.KeyboardSprintKeyDown` / `Up` to Genshin's semantic Sprint.
+--    * Because Genshin binds Sprint to BOTH Left Shift and Right Mouse Button (RMB),
+--      Left Shift and RMB ALWAYS trigger the exact same event (`KeyboardSprintKeyDown`).
+--    * NEVER assign Left Shift and RMB to two different game mechanics! Treat Sprint as one unified action.
+--    * Distinct Semantic Keys:
 --        - LMB / Normal Attack : `KeyboardNormalAttackKeyDown` / `Up`
 --        - Shift OR RMB (Sprint): `KeyboardSprintKeyDown` / `Up`
 --        - Space (Jump)        : `KeyboardJumpKeyDown` / `Up`
@@ -88,46 +114,25 @@
 --        - R (Aim / Skill 3)   : `KeyboardCharacterSkill3KeyDown` / `Up`
 --        - T (Skill 4)         : `KeyboardCharacterSkill4KeyDown` / `Up`
 --        - F (Interact)        : `KeyboardInteractKeyDown` / `Up`
+--        - X (Drop Key)        : `KeyboardDropKeyDown` / `Up` (Great for Quick Menu toggle)
 --
--- 8. WHY `ClientUIKeyHintControl` IS MANDATORY FOR KEY PROMPTS (NEVER HARDCODE "PRESS R" IN TEXT!):
---    * All 164 `Enum.KeyEventType` events (58 Keyboard actions × 2 Down/Up = 116 + 24 Controller
---      actions × 2 Down/Up = 48) are connected to the **player's semantic in-game keybinds**!
---    * THE STATIC TEXT TRAP:
---      - Suppose your stage listens for `Enum.KeyEventType.KeyboardCharacterSkill3KeyDown` (default `R`).
---      - If you write a static `TextBoxControl` saying `"Press R to Reload"`, any player who remapped
---        Skill 3 (`R`) to another key (e.g., `[` or `Mouse 4`) or plays on a Gamepad (`D-pad Up`)
---        will see the wrong key and think your game is broken!
---      - Worse still: if the stage creator themselves rebound `R` to `[` in their own game settings
---        and wrote static text `"Press ["`, every player with default settings has to press `R`!
---    * THE SOLUTION (`ClientUIKeyHintControl`):
---      - Always display a `ClientUIKeyHintControl` badge alongside your action text!
---      - Set `keyHint.keyboardKeyCode = Enum.KeyboardKeyCode.CharacterSkill3Key` (59 total items:
---        58 semantic PC keys + `None`) and `keyHint.controllerKeyCode = Enum.ControllerKeyCode.CharacterSkill3Key`
---        (25 total items: 24 semantic Gamepad buttons/combos + `None`).
---      - `KeyHintControl` queries the client's live keybind settings and renders the exact keycap or
---        gamepad button (or `LB + ...` combo) that specific player has bound!
+-- 9. DYNAMIC KEY PROMPTS VIA `ClientUIKeyHintControl` (NEVER HARDCODE "PRESS R" IN TEXT!):
+--    * Always display a `ClientUIKeyHintControl` badge alongside action text.
+--    * Set `keyHint.keyboardKeyCode = Enum.KeyboardKeyCode.CharacterSkill3Key` and
+--      `keyHint.controllerKeyCode = Enum.ControllerKeyCode.CharacterSkill3Key`.
+--    * `KeyHintControl` queries the client's live keybind settings and renders the exact keycap or
+--      gamepad button (or combo) that specific player has bound.
 --
--- 9. VIEWPORT CENTERING STRATEGIES (BOTH VERIFIED IN GENSHIN):
---    * Strategy A (Centered Fit-to-View Root Container via `SetLocalScale`):
---      - Anchor `root` (`script.object`) at center `(0.5, 0.5)` with `SetPivot(0.5, 0.5)`,
---        `SetAnchoredPosition(0, 0)`, `SetSizeDelta(DESIGN_W, DESIGN_H)`, and scale uniformly
---        via `root:SetLocalScale(rootScale, rootScale, 1)` where
---        `rootScale = math.min(vw / DESIGN_W, vh / DESIGN_H)`.
---      - Convert raw cursor coordinates (`game.GetCursorUIPos()`) into design space via:
---        `local lx = DESIGN_W * 0.5 + (cx - vw * 0.5) / rootScale`
---    * Strategy B (Full-Viewport Root + `CenterStageLayout()` Offset):
---      - Keep `root` at `(0, 0)` with `SetSizeDelta(screenWidth, screenHeight)` and shift
---        stage/HUD coordinates by `stageOffsetX = (screenWidth - 960) * 0.5`,
---        `stageOffsetY = (screenHeight - 640) * 0.5`. Keeps raw cursor coordinates 1:1!
---
--- 10. CLOSING / EXITING AN ACTIVE UI SCRIPT (`ServerSignal:SendSignal()` + `root:SetActive(false)`):
---    * When a player exits a minigame or UI overlay, first dispatch a `ServerSignal` so the
---      stage's Server Node Graph knows the UI was closed:
---        local exitSig = game.ServerSignal("EXIT_GAME")
---        exitSig:SendSignal()
---    * Then stop per-frame updates and deactivate the root UI container (`script.object`):
---        script:EnableUpdate(false)
---        script.object:SetActive(false)
+-- 10. LAUNCHING & CLOSING A ROOT UI EXPERIENCE (`ServerSignal` + Node Graph `Set UI Control (Group) Status`):
+--    * NEVER call `root:SetActive(false)` or `root:SetVisible(false)` on `script.object`!
+--      If a Lua script sets its own root container inactive, the Genshin Node Graph CANNOT reopen it.
+--    * Proper Exit Pattern:
+--        root.showCursor = false
+--        local exitSig = game.ServerSignal("GAME_EXIT_SIGNAL")
+--        if exitSig then
+--            exitSig:AddInt(math.floor(highScore or 0))
+--            exitSig:SendSignal()
+--        end
 -- ============================================================================
 
 -- ============================================================================
@@ -370,6 +375,13 @@ function OnStart()
     -- Inherits: ClientUIBaseControl
     -- NOTE: Has .bgColor! Has NO extra methods beyond BaseControl, NO .interactable,
     --       NO .raycastTarget, and NO :AddCursorEventListener!
+    -- GENSHIN IMPACT RUNTIME TEXT VISIBILITY & VALIDATION RULES:
+    --   1. Minimum valid .fontSize in Genshin is 12! Any .fontSize < 12 (e.g. 8, 9, 10, 11)
+    --      triggers runtime error: "<script>:<line>: Font size limit exceeded." and causes texts to fail!
+    --   2. Always clamp: local fontSize = math.max(12, size or 16)
+    --   3. Always size the TextBox height to at least math.max(height, fontSize * 2 + 6, 30)
+    --      with SetPivot(0.5, 0.5) so Genshin's CJK/Unicode font line-height (~2.1x fontSize)
+    --      never vertically overflows or gets culled inside a tight box.
     -- ------------------------------------------------------------------------
     local textBoxCtrl = game.InstantiateClientUIControl(TEMPLATE_TEXTBOX, containerCtrl)
     textBoxCtrl.name = "TextBoxControlSpec"
@@ -381,15 +393,15 @@ function OnStart()
 
     -- TextBoxControl Fields (0 subclass methods):
     textBoxCtrl.text                = "ClientUITextBoxControl\nSupports .text, .fontSize, .fontColor, .bgColor, .enableOutline, .outlineColor"
-    textBoxCtrl.fontSize            = 14                                     -- integer [Read/Write/Tweenable]
+    textBoxCtrl.fontSize            = 14                                     -- integer [Read/Write/Tweenable] (MUST be >= 12)
     textBoxCtrl.fontColor           = Color.FromRGBA(238, 217, 171, 255)     -- ColorValue [Read/Write/Tweenable]
     textBoxCtrl.bgColor             = Color.FromRGBA(42, 34, 26, 255)        -- ColorValue [Read/Write/Tweenable]
     textBoxCtrl.enableOutline       = true                                   -- boolean [Read/Write]
     textBoxCtrl.outlineColor        = Color.FromRGBA(12, 10, 8, 255)         -- ColorValue [Read/Write/Tweenable]
     textBoxCtrl.horizontalAlignment = Enum.TextHorizontalAlignment.Middle    -- Left, Middle, Right [Read/Write]
     textBoxCtrl.verticalAlignment   = Enum.TextVerticalAlignment.Middle      -- Top, Middle, Bottom [Read/Write]
-    textBoxCtrl.adaptiveFontSize    = true                                   -- boolean [Read/Write]
-    textBoxCtrl.minimumFontSize     = 10                                     -- integer [Read/Write/Tweenable]
+    textBoxCtrl.adaptiveFontSize    = false                                  -- boolean [Read/Write]
+    textBoxCtrl.minimumFontSize     = 12                                     -- integer [Read/Write/Tweenable] (MUST be >= 12)
 
     -- ------------------------------------------------------------------------
     -- TYPE 4: ClientUITextWindowControl (Scrollable Multi-Line Text Box)
@@ -805,20 +817,40 @@ function OnStart()
     local infCheck = math.isinf(math.huge)
     local nanCheck = math.isnan(0 / 0)
 
-    -- [Verified In-Game TextBox Factory Pattern (`NewText`)]
-    -- Always compute local `fontSize` and `textHeight = math.max(h, fontSize * 2)` first,
+    -- [Verified In-Game UI Factory Constructors]
+    local function Configure(control, x, y, width, height, name)
+        control.name = name
+        control:SetAnchorMin(0.5, 0.5)
+        control:SetAnchorMax(0.5, 0.5)
+        control:SetPivot(0.5, 0.5)
+        control:SetAnchoredPosition(x, y)
+        control:SetSizeDelta(width, height)
+        control:SetVisible(true)
+        return control
+    end
+
+    local function CreateVerifiedImage(parent, name, x, y, width, height, color, resId, softEdge)
+        local img = game.InstantiateClientUIControl(TEMPLATE_IMAGE, parent)
+        if not img then return nil end
+        Configure(img, x, y, width, height, name)
+        img:SetImage(Enum.ImageSource.StaticReference, resId or ASSET_RECTANGLE)
+        img.imageType = Enum.ImageType.Stretch
+        img.imageColor = color or Color.FromRGB(255, 255, 255)
+        if softEdge then
+            img.enableSoftEdge = true
+            img:SetSoftEdgeWidth(4, 4)
+        end
+        return img
+    end
+
+    -- Always compute local `fontSize >= 12` and `textHeight = math.max(h, fontSize * 2)` first,
     -- configure alignment/color/fontSize BEFORE assigning `.text`, then `:SetVisible(true)` and `:SetAsLastSibling()`.
     local function CreateVerifiedText(parent, name, text, x, y, w, h, size, textColor, bgColor)
         local lbl = game.InstantiateClientUIControl(TEMPLATE_TEXTBOX, parent)
         if not lbl then return nil end
-        local fontSize = size or 14
-        local textHeight = math.max(h, fontSize * 2)
-        lbl.name = name
-        lbl:SetAnchorMin(0.5, 0.5)
-        lbl:SetAnchorMax(0.5, 0.5)
-        lbl:SetPivot(0.5, 0.5)
-        lbl:SetAnchoredPosition(x, y)
-        lbl:SetSizeDelta(w, textHeight)
+        local fontSize = math.max(12, math.min(size or 14, 72))
+        local textHeight = math.max(h or 28, fontSize * 2)
+        Configure(lbl, x, y, w, textHeight, name)
         lbl.fontSize = fontSize
         lbl.fontColor = textColor or Color.FromRGB(230, 205, 145)
         lbl.bgColor = bgColor or Color.FromRGBA(0, 0, 0, 0)
@@ -829,6 +861,26 @@ function OnStart()
         lbl:SetVisible(true)
         lbl:SetAsLastSibling()
         return lbl
+    end
+
+    local function CreateVerifiedMenuButton(parent, name, x, y, w, h, bgCol, titleTxt, subTxt, onClick)
+        local btn = game.InstantiateClientUIControl(TEMPLATE_PRESET_BUTTON, parent)
+        if not btn then return nil end
+        Configure(btn, x, y, w, h, name)
+        btn.interactable = true
+        btn.raycastTarget = true
+        CreateVerifiedImage(btn, name .. "_Bg", 0, 0, w, h, bgCol, ASSET_RECTANGLE, true)
+        CreateVerifiedImage(btn, name .. "_Border", 0, h * 0.5 - 2, w - 8, 2, Color.FromRGB(238, 217, 171), ASSET_RECTANGLE, false)
+        if subTxt and subTxt ~= "" then
+            CreateVerifiedText(btn, name .. "_Title", titleTxt, 0, h * 0.18, w - 16, 24, 13, Color.FromRGB(255, 255, 255))
+            CreateVerifiedText(btn, name .. "_Sub", subTxt, 0, -h * 0.22, w - 16, 24, 12, Color.FromRGB(238, 217, 171))
+        else
+            CreateVerifiedText(btn, name .. "_Title", titleTxt, 0, 0, w - 16, 26, 13, Color.FromRGB(255, 255, 255))
+        end
+        btn:AddCursorEventListener(Enum.CursorEventType.CursorClick, function()
+            if onClick then onClick() end
+        end)
+        return btn
     end
 
     -- Footer Status Readout (using verified TextBox constructor pattern)

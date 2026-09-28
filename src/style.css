@@ -509,7 +509,8 @@ html, body {
   justify-content: space-between;
   padding: 8px 12px;
   cursor: pointer;
-  user-select: none;
+  user-select: text;
+  -webkit-user-select: text;
   gap: 12px;
 }
 
@@ -534,6 +535,8 @@ html, body {
   font-weight: 700;
   line-height: 1;
   flex-shrink: 0;
+  user-select: none;
+  cursor: pointer;
 }
 
 .field-type-badge {
@@ -541,6 +544,7 @@ html, body {
   font-size: 10px;
   font-weight: 700;
   flex-shrink: 0;
+  user-select: none;
 }
 
 .field-signature-code {
@@ -551,6 +555,9 @@ html, body {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  user-select: text;
+  -webkit-user-select: text;
+  cursor: text;
 }
 
 .field-type-tag {
@@ -558,6 +565,9 @@ html, body {
   color: var(--text-muted);
   white-space: nowrap;
   flex-shrink: 0;
+  user-select: text;
+  -webkit-user-select: text;
+  cursor: text;
 }
 
 .field-header-right {
@@ -648,7 +658,8 @@ html, body {
   justify-content: space-between;
   padding: 10px 12px;
   cursor: pointer;
-  user-select: none;
+  user-select: text;
+  -webkit-user-select: text;
   gap: 12px;
 }
 
@@ -673,6 +684,8 @@ html, body {
   font-weight: 700;
   line-height: 1;
   flex-shrink: 0;
+  user-select: none;
+  cursor: pointer;
 }
 
 .method-type-badge {
@@ -680,6 +693,7 @@ html, body {
   font-size: 10.5px;
   font-weight: 700;
   flex-shrink: 0;
+  user-select: none;
 }
 
 .method-signature-text {
@@ -690,6 +704,9 @@ html, body {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  user-select: text;
+  -webkit-user-select: text;
+  cursor: text;
 }
 
 .method-header-right {
@@ -703,6 +720,9 @@ html, body {
   font-size: 11.5px;
   color: var(--text-muted);
   font-weight: 500;
+  user-select: text;
+  -webkit-user-select: text;
+  cursor: text;
 }
 
 .method-accordion-body {
