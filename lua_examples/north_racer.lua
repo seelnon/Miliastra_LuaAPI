@@ -37,8 +37,8 @@ local STAR4_RESOURCE = 100004
 local EXIT_SIGNAL_NAME = "NORTH_RACER_EXIT"
 
 -- Fixed Design Container & World Constants (Centered Fit-to-View)
-local DESIGN_WIDTH = 960
-local DESIGN_HEIGHT = 640
+local DESIGN_WIDTH = 1600
+local DESIGN_HEIGHT = 900
 local screenWidth = DESIGN_WIDTH
 local screenHeight = DESIGN_HEIGHT
 local rootScale = 1.0
@@ -2903,6 +2903,7 @@ end
 function OnStart()
 	math.randomseed(1337)
 	root = script.object
+	root.showCursor = true
 	if not root then
 		printerr("[GTA2 North Racer] script.object is nil")
 		return
