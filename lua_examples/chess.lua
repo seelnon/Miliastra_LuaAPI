@@ -88,8 +88,8 @@ local COLOR_CHECK_SQ = Color(205, 68, 62, 255)
 local COLOR_MOVE_DOT = Color(28, 24, 20, 51)        -- ~20% opacity so pieces stand out
 local COLOR_CAPTURE_RING = Color(182, 54, 48, 76)   -- ~30% opacity subtle capture ring
 local COLOR_WHITE_PIECE = Color(248, 245, 238, 255)
-local COLOR_BLACK_PIECE = Color(66, 47, 34, 255)     -- Coffee color (matching board edge aesthetic)
-local COLOR_PIECE_OUTLINE = Color(16, 11, 7, 255)    -- Dark outline around both White and Black pieces
+local COLOR_BLACK_PIECE = Color(32, 26, 22, 255)
+local COLOR_WHITE_OUTLINE = Color(18, 12, 8, 255)    -- Dark outline around White pieces
 local COLOR_SOFT_SHADOW_BELOW = Color(14, 10, 7, 90) -- Soft contact shadow directly hugging piece base
 local COLOR_TRANSPARENT = Color(0, 0, 0, 0)
 local COLOR_HUD_GOLD = Color(238, 217, 171, 255)
@@ -806,7 +806,7 @@ local function RenderSquaresAndPieces()
 		end
 	end
 
-	-- 2. Update piece glyph, dark outline, and soft shadow below the piece
+	-- 2. Update piece glyph, White dark outline, and soft shadow below the piece
 	for i = 1, #pieces do
 		local piece = pieces[i]
 		local control = piece.control
@@ -817,20 +817,27 @@ local function RenderSquaresAndPieces()
 			local y = boardBottom + (piece.rank - 0.5) * squareSize
 			local glyph = pieceGlyphs[piece.color][piece.kind]
 			if baseShadow then
-				local shadowW = piece.kind == "P" and (squareSize * 0.36) or (squareSize * 0.44)
-				baseShadow:SetSizeDelta(shadowW, squareSize * 0.11)
-				baseShadow:SetAnchoredPosition(x, y - squareSize * 0.155)
+				baseShadow:SetAnchoredPosition(x, y - squareSize * 0.165)
 				baseShadow:SetVisible(true)
 			end
 			if dropShadow then
-				dropShadow:SetAnchoredPosition(x, y - pieceShadowOffsetY)
-				dropShadow.text = glyph
+				if piece.color == "white" then
+					dropShadow:SetAnchoredPosition(x, y - pieceShadowOffsetY)
+					dropShadow.text = glyph
+				else
+					dropShadow.text = ""
+				end
 			end
 			control:SetAnchoredPosition(x, y)
 			control.text = glyph
-			control.fontColor = piece.color == "white" and COLOR_WHITE_PIECE or COLOR_BLACK_PIECE
-			control.enableOutline = true
-			control.outlineColor = COLOR_PIECE_OUTLINE
+			if piece.color == "white" then
+				control.fontColor = COLOR_WHITE_PIECE
+				control.enableOutline = true
+				control.outlineColor = COLOR_WHITE_OUTLINE
+			else
+				control.fontColor = COLOR_BLACK_PIECE
+				control.enableOutline = false
+			end
 		else
 			if baseShadow then
 				baseShadow:SetVisible(false)
@@ -1161,24 +1168,30 @@ local function AddPiece(color, kind, file, rank)
 	baseShadow:SetAnchorMin(0, 0)
 	baseShadow:SetAnchorMax(0, 0)
 	baseShadow:SetPivot(0.5, 0.5)
-	baseShadow:SetAnchoredPosition(x, y - squareSize * 0.155)
-	local shadowW = kind == "P" and (squareSize * 0.36) or (squareSize * 0.44)
-	baseShadow:SetSizeDelta(shadowW, squareSize * 0.11)
+	baseShadow:SetAnchoredPosition(x, y - squareSize * 0.165)
+	baseShadow:SetSizeDelta(squareSize * 0.50, squareSize * 0.13)
 	baseShadow:SetImage(Enum.ImageSource.StaticReference, CIRCLE_ASSET)
 	baseShadow.enableSoftEdge = true
 	baseShadow.imageColor = COLOR_SOFT_SHADOW_BELOW
 
-	-- Soft downward glyph shadow directly below the piece (both White & Black)
-	local dropShadow = game.InstantiateClientUIControl(TEXTBOX_TEMPLATE, boardControl)
-	SetText(dropShadow, x, y - pieceShadowOffsetY, squareSize, squareSize, glyph,
-		fontSize, COLOR_SOFT_SHADOW_BELOW, name .. "_DropShadow")
+	-- Soft downward glyph shadow for White pieces (shifted down, not side-to-side)
+	local dropShadow = nil
+	if color == "white" then
+		dropShadow = game.InstantiateClientUIControl(TEXTBOX_TEMPLATE, boardControl)
+		SetText(dropShadow, x, y - pieceShadowOffsetY, squareSize, squareSize, glyph,
+			fontSize, COLOR_SOFT_SHADOW_BELOW, name .. "_DropShadow")
+	end
 
-	-- Main piece foreground glyph (with dark outline enabled for both White and Black pieces)
+	-- Main piece foreground glyph (with darker outline enabled for White pieces)
 	local control = game.InstantiateClientUIControl(TEXTBOX_TEMPLATE, boardControl)
 	SetText(control, x, y, squareSize, squareSize, glyph,
 		fontSize, color == "white" and COLOR_WHITE_PIECE or COLOR_BLACK_PIECE, name)
-	control.enableOutline = true
-	control.outlineColor = COLOR_PIECE_OUTLINE
+	if color == "white" then
+		control.enableOutline = true
+		control.outlineColor = COLOR_WHITE_OUTLINE
+	else
+		control.enableOutline = false
+	end
 
 	local piece = {
 		control = control,
