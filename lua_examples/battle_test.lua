@@ -1004,7 +1004,7 @@ local function BuildHUD()
 
 	CreateMenuButton(mainMenuPanel, "MenuBtnExit", mw * 0.5, 72, 460, 50,
 		Color.FromRGB(58, 36, 32),
-		"✕ EXIT COLOSSEUM",
+		"✕ EXIT COLOSSEUM"
 		function()
 			ExitBattle()
 		end
