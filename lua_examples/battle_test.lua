@@ -240,7 +240,7 @@ local function NewText(parent, name, text, x, y, width, height, size, textColor,
 	return label
 end
 
-local function CreateMenuButton(parent, name, x, y, w, h, bgCol, titleTxt, subTxt, onClick)
+local function CreateMenuButton(parent, name, x, y, w, h, bgCol, titleTxt, onClick)
 	local btn = game.InstantiateClientUIControl(BUTTON_TEMPLATE, parent)
 	if not btn then return nil end
 	Configure(btn, x, y, w, h, name)
@@ -974,7 +974,8 @@ local function BuildHUD()
 
 	CreateMenuButton(mainMenuPanel, "MenuBtn100", mw * 0.5, 340, 460, 56,
 		Color.FromRGB(46, 88, 56),
-		"▶ 100 vs 100 COLOSSEUM CLASH (200 UNITS)"
+		"▶ 100 vs 100 COLOSSEUM CLASH",
+		"Smooth 60 FPS Standard Army Scale • O(N) Spatial Grid",
 		function()
 			ResumeBattle(100)
 		end
@@ -982,7 +983,8 @@ local function BuildHUD()
 
 	CreateMenuButton(mainMenuPanel, "MenuBtn250", mw * 0.5, 272, 460, 56,
 		Color.FromRGB(124, 84, 34),
-		"▶ 250 vs 250 GRAND LEGION WAR (500 UNITS)"
+		"▶ 250 vs 250 GRAND LEGION WAR",
+		"500 Simultaneous Colliding & Fighting Warriors",
 		function()
 			ResumeBattle(250)
 		end
@@ -990,7 +992,8 @@ local function BuildHUD()
 
 	CreateMenuButton(mainMenuPanel, "MenuBtn500", mw * 0.5, 204, 460, 56,
 		Color.FromRGB(142, 42, 36),
-		"🔥 500 vs 500 EXTREME STRESS TEST (1,000 UNITS)"
+		"🔥 500 vs 500 EXTREME STRESS TEST",
+		"Maximum 1,000-Unit Native C++/Lua Engine Torture Test!",
 		function()
 			ResumeBattle(500)
 		end
@@ -998,7 +1001,8 @@ local function BuildHUD()
 
 	CreateMenuButton(mainMenuPanel, "MenuBtn50", mw * 0.5, 136, 460, 52,
 		Color.FromRGB(52, 68, 98),
-		"▶ 50 vs 50 SKIRMISH (100 UNITS)"
+		"▶ 50 vs 50 SKIRMISH",
+		"Fast Tactical Gladiators & Heavy Centurion Commanders",
 		function()
 			ResumeBattle(50)
 		end
@@ -1006,7 +1010,8 @@ local function BuildHUD()
 
 	CreateMenuButton(mainMenuPanel, "MenuBtnExit", mw * 0.5, 72, 460, 50,
 		Color.FromRGB(58, 36, 32),
-		"✕ EXIT COLOSSEUM"
+		"✕ EXIT COLOSSEUM",
+		"Dispatches ServerSignal '" .. EXIT_SIGNAL_NAME .. "' with Total Kills",
 		function()
 			ExitBattle()
 		end
