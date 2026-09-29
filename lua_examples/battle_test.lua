@@ -160,9 +160,9 @@ local autoRespawnWave  = false
 -- AI Tactics: 1 = "DIRECT CHARGE", 2 = "VORTEX SWIRL", 3 = "PHALANX LINE"
 local tacticMode  = 1
 local TACTIC_NAMES = {
-	"⚔️ TACTIC: ALL-OUT CHARGE [R]",
-	"🌀 TACTIC: VORTEX SWARM [R]",
-	"🛡️ TACTIC: PHALANX WALL [R]"
+	"TACTIC: ALL-OUT CHARGE [R]",
+	"TACTIC: VORTEX SWARM [R]",
+	"TACTIC: PHALANX WALL [R]"
 }
 
 -- ============================================================================
@@ -226,7 +226,7 @@ local function NewText(parent, name, text, x, y, width, height, size, textColor,
 	local label = game.InstantiateClientUIControl(TEXT_TEMPLATE, parent)
 	if not label then return nil end
 	local fontSize = math.max(12, math.min(size or 14, 72))
-	local textHeight = math.max(height or 28, fontSize * 2)
+	local textHeight = math.max(height or 30, fontSize * 2 + 6, 30)
 	Configure(label, x, y, width, textHeight, name)
 	label.fontSize = fontSize
 	label.fontColor = textColor or PALETTE.hudWhite
@@ -240,19 +240,24 @@ local function NewText(parent, name, text, x, y, width, height, size, textColor,
 	return label
 end
 
+-- Procedural Button Builder:
+-- CRITICAL RULE: PresetButton (`BUTTON_TEMPLATE`) is ONLY an interactive hull!
+-- Never parent `NewText` or `NewImage` inside `btn` (`BUTTON_TEMPLATE`).
+-- Always parent `Bg`, `Accent`, `btn`, and `Title`/`Sub` to `parent` (`ContainerControl`),
+-- creating `NewText` AFTER (`ON TOP OF`) `btn` so text renders visibly while clicks pass through to `btn`.
 local function CreateMenuButton(parent, name, x, y, w, h, bgCol, titleTxt, subTxt, onClick)
+	NewImage(parent, name .. "_Bg", x, y, w, h, bgCol, RECTANGLE_RESOURCE, true)
+	NewImage(parent, name .. "_Accent", x, y + h * 0.5 - 2, w - 6, 2, PALETTE.hudGold, RECTANGLE_RESOURCE, false)
 	local btn = game.InstantiateClientUIControl(BUTTON_TEMPLATE, parent)
 	if not btn then return nil end
 	Configure(btn, x, y, w, h, name)
 	btn.interactable = true
 	btn.raycastTarget = true
-	NewImage(btn, name .. "_Bg", w * 0.5, h * 0.5, w, h, bgCol, RECTANGLE_RESOURCE, true)
-	NewImage(btn, name .. "_Accent", w * 0.5, h - 2, w - 6, 2, PALETTE.hudGold, RECTANGLE_RESOURCE, false)
 	if subTxt and subTxt ~= "" then
-		NewText(btn, name .. "_Title", titleTxt, w * 0.5, h * 0.66, w - 16, 26, 14, PALETTE.hudWhite)
-		NewText(btn, name .. "_Sub", subTxt, w * 0.5, h * 0.28, w - 16, 24, 12, PALETTE.hudGold)
+		NewText(parent, name .. "_Title", titleTxt, x, y + h * 0.18, w - 16, 30, 14, PALETTE.hudWhite)
+		NewText(parent, name .. "_Sub", subTxt, x, y - h * 0.20, w - 16, 30, 12, PALETTE.hudGold)
 	else
-		NewText(btn, name .. "_Title", titleTxt, w * 0.5, h * 0.5, w - 16, 28, 13, PALETTE.hudWhite)
+		NewText(parent, name .. "_Title", titleTxt, x, y, w - 16, 30, 13, PALETTE.hudWhite)
 	end
 	btn:AddCursorEventListener(Enum.CursorEventType.CursorClick, function()
 		if onClick then onClick() end
@@ -434,7 +439,7 @@ local function SpawnBattle(perSide)
 
 	if statusBanner then
 		statusBanner.text = string.format(
-			"⚔️ COLOSSEUM CLASH: %d vs %d (%d ACTIVE UNITS) — CLICK ARENA FOR SHOCKWAVE!",
+			"COLOSSEUM CLASH: %d vs %d (%d ACTIVE UNITS) — CLICK ARENA FOR SHOCKWAVE!",
 			currentPerSide, currentPerSide, activeTotal
 		)
 		statusBanner.fontColor = PALETTE.hudGold
@@ -766,13 +771,13 @@ local function StepColosseumSimulation(dt)
 		elseif statusBanner then
 			if crimsonAliveCnt > 0 then
 				statusBanner.text = string.format(
-					"🏆 CRIMSON LEGION TRIUMPHS! (%d SURVIVORS) — CLICK [SPAWN WAVE] OR PRESS [SPACE]",
+					"CRIMSON LEGION TRIUMPHS! (%d SURVIVORS) — CLICK [SPAWN WAVE] OR PRESS [SPACE]",
 					crimsonAliveCnt
 				)
 				statusBanner.fontColor = PALETTE.crimsonHeavy
 			else
 				statusBanner.text = string.format(
-					"🏆 AZURE VANGUARD TRIUMPHS! (%d SURVIVORS) — CLICK [SPAWN WAVE] OR PRESS [SPACE]",
+					"AZURE VANGUARD TRIUMPHS! (%d SURVIVORS) — CLICK [SPAWN WAVE] OR PRESS [SPACE]",
 					azureAliveCnt
 				)
 				statusBanner.fontColor = PALETTE.azureHeavy
@@ -878,20 +883,21 @@ local function BuildHUD()
 		"CRIMSON: 100   vs   AZURE: 100",
 		DESIGN_WIDTH * 0.5, DESIGN_HEIGHT - 44, 360, 24, 12, PALETTE.hudWhite)
 
-	-- Top-Left Menu Button + Dynamic KeyHint [X]
+	-- Top-Left Menu Button + Dynamic KeyHint [X] (Visuals & TextBox created ON TOP of button hull in hudLayer)
+	NewImage(hudLayer, "MenuHudBg", 72, DESIGN_HEIGHT - 32, 124, 36, PALETTE.hudBg, RECTANGLE_RESOURCE, true)
+	NewImage(hudLayer, "MenuHudAccent", 72, DESIGN_HEIGHT - 16, 118, 2, PALETTE.hudGold, RECTANGLE_RESOURCE, false)
 	menuHudBtn = game.InstantiateClientUIControl(BUTTON_TEMPLATE, hudLayer)
 	Configure(menuHudBtn, 72, DESIGN_HEIGHT - 32, 124, 36, "MenuHudBtn")
 	menuHudBtn.interactable = true
 	menuHudBtn.raycastTarget = true
-	NewImage(menuHudBtn, "MenuHudBg", 62, 18, 124, 36, PALETTE.hudBg, RECTANGLE_RESOURCE, true)
-	NewImage(menuHudBtn, "MenuHudAccent", 62, 34, 118, 2, PALETTE.hudGold, RECTANGLE_RESOURCE, false)
-	NewText(menuHudBtn, "MenuHudTxt", "MENU [X]", 50, 18, 90, 24, 12, PALETTE.hudGold)
+	NewText(hudLayer, "MenuHudTxt", "MENU [X]", 60, DESIGN_HEIGHT - 32, 92, 30, 12, PALETTE.hudGold)
 
-	local keyHint = game.InstantiateClientUIControl(KEY_HINT_TEMPLATE, menuHudBtn)
+	local keyHint = game.InstantiateClientUIControl(KEY_HINT_TEMPLATE, hudLayer)
 	if keyHint then
-		Configure(keyHint, 104, 18, 22, 18, "MenuKeyHint")
+		Configure(keyHint, 114, DESIGN_HEIGHT - 32, 22, 18, "MenuKeyHint")
 		keyHint.keyboardKeyCode = Enum.KeyboardKeyCode.DropKey
 		keyHint.controllerKeyCode = Enum.ControllerKeyCode.MenuBackKey
+		keyHint:SetAsLastSibling()
 	end
 	menuHudBtn:AddCursorEventListener(Enum.CursorEventType.CursorClick, function()
 		ShowMainMenu()
@@ -902,8 +908,8 @@ local function BuildHUD()
 		PALETTE.hudBg, RECTANGLE_RESOURCE, true)
 
 	statusBanner = NewText(hudLayer, "StatusBanner",
-		"⚔️ CLICK INSIDE THE COLOSSEUM TO UNLEASH WARHORN SHOCKWAVE!",
-		DESIGN_WIDTH * 0.5, 74, 880, 24, 12, PALETTE.hudGold)
+		"CLICK INSIDE THE COLOSSEUM TO UNLEASH WARHORN SHOCKWAVE!",
+		DESIGN_WIDTH * 0.5, 74, 880, 30, 12, PALETTE.hudGold)
 
 	local presets = {
 		{ label = "50 vs 50 (100)",   count = 50,  x = 152, col = Color.FromRGB(48, 86, 56)  },
@@ -920,27 +926,27 @@ local function BuildHUD()
 		end)
 	end
 
-	-- Tactic Switcher Button
+	-- Tactic Switcher Button (TextBox created ON TOP of button hull in hudLayer)
+	NewImage(hudLayer, "TacticBg", 902, 34, 224, 38, Color.FromRGB(64, 52, 38), RECTANGLE_RESOURCE, true)
+	NewImage(hudLayer, "TacticAccent", 902, 51, 218, 2, PALETTE.hudGold, RECTANGLE_RESOURCE, false)
 	local tacticBtn = game.InstantiateClientUIControl(BUTTON_TEMPLATE, hudLayer)
 	Configure(tacticBtn, 902, 34, 224, 38, "TacticCycleBtn")
 	tacticBtn.interactable = true
 	tacticBtn.raycastTarget = true
-	NewImage(tacticBtn, "TacticBg", 112, 19, 224, 38, Color.FromRGB(64, 52, 38), RECTANGLE_RESOURCE, true)
-	NewImage(tacticBtn, "TacticAccent", 112, 36, 218, 2, PALETTE.hudGold, RECTANGLE_RESOURCE, false)
-	tacticBtnLabel = NewText(tacticBtn, "TacticTxt", TACTIC_NAMES[tacticMode], 112, 19, 212, 26, 12, PALETTE.hudGold)
+	tacticBtnLabel = NewText(hudLayer, "TacticTxt", TACTIC_NAMES[tacticMode], 902, 34, 212, 30, 12, PALETTE.hudGold)
 	tacticBtn:AddCursorEventListener(Enum.CursorEventType.CursorClick, function()
 		tacticMode = (tacticMode % #TACTIC_NAMES) + 1
 		tacticBtnLabel.text = TACTIC_NAMES[tacticMode]
 	end)
 
-	-- Respawn / Endless Wave Toggle Button
+	-- Respawn / Endless Wave Toggle Button (TextBox created ON TOP of button hull in hudLayer)
+	NewImage(hudLayer, "WaveBtnBg", 1114, 34, 172, 38, Color.FromRGB(88, 68, 42), RECTANGLE_RESOURCE, true)
+	NewImage(hudLayer, "WaveBtnAccent", 1114, 51, 166, 2, PALETTE.hudGold, RECTANGLE_RESOURCE, false)
 	local waveBtn = game.InstantiateClientUIControl(BUTTON_TEMPLATE, hudLayer)
 	Configure(waveBtn, 1114, 34, 172, 38, "WaveRespawnBtn")
 	waveBtn.interactable = true
 	waveBtn.raycastTarget = true
-	NewImage(waveBtn, "WaveBtnBg", 86, 19, 172, 38, Color.FromRGB(88, 68, 42), RECTANGLE_RESOURCE, true)
-	NewImage(waveBtn, "WaveBtnAccent", 86, 36, 166, 2, PALETTE.hudGold, RECTANGLE_RESOURCE, false)
-	local waveBtnLbl = NewText(waveBtn, "WaveBtnTxt", "↻ SPAWN WAVE [SPC]", 86, 19, 162, 26, 12, PALETTE.hudWhite)
+	NewText(hudLayer, "WaveBtnTxt", "SPAWN WAVE [SPC]", 1114, 34, 162, 30, 12, PALETTE.hudWhite)
 	waveBtn:AddCursorEventListener(Enum.CursorEventType.CursorClick, function()
 		SpawnBattle(currentPerSide)
 	end)
@@ -956,15 +962,15 @@ local function BuildHUD()
 	NewImage(mainMenuPanel, "MenuTopGold", mw * 0.5, mh - 3, mw - 8, 4,
 		PALETTE.hudGold, RECTANGLE_RESOURCE, false)
 
-	NewText(mainMenuPanel, "MenuTitle", "⚔️ COLOSSEUM MASSIVE BATTLE",
-		mw * 0.5, mh - 34, mw - 32, 32, 18, PALETTE.hudGold)
+	NewText(mainMenuPanel, "MenuTitle", "COLOSSEUM MASSIVE BATTLE",
+		mw * 0.5, mh - 34, mw - 32, 38, 18, PALETTE.hudGold)
 	NewText(mainMenuPanel, "MenuSub", "60 FPS LUA -> C++ SPATIAL HASH BENCHMARK (1280x720 HD)",
-		mw * 0.5, mh - 62, mw - 32, 24, 12, PALETTE.hudWhite)
+		mw * 0.5, mh - 62, mw - 32, 30, 12, PALETTE.hudWhite)
 
 	CreateMenuButton(mainMenuPanel, "MenuBtn100", mw * 0.5, 340, 460, 56,
 		Color.FromRGB(46, 88, 56),
-		"▶ 100 vs 100 COLOSSEUM CLASH (200 UNITS)",
-		"Smooth 60 FPS Standard Army Scale • O(N) Spatial Grid",
+		">> 100 vs 100 COLOSSEUM CLASH (200 UNITS)",
+		"Smooth 60 FPS Standard Army Scale - O(N) Spatial Grid",
 		function()
 			ResumeBattle(100)
 		end
@@ -972,7 +978,7 @@ local function BuildHUD()
 
 	CreateMenuButton(mainMenuPanel, "MenuBtn250", mw * 0.5, 272, 460, 56,
 		Color.FromRGB(124, 84, 34),
-		"▶ 250 vs 250 GRAND LEGION WAR (500 UNITS)",
+		">> 250 vs 250 GRAND LEGION WAR (500 UNITS)",
 		"500 Simultaneous Colliding & Fighting Warriors",
 		function()
 			ResumeBattle(250)
@@ -981,7 +987,7 @@ local function BuildHUD()
 
 	CreateMenuButton(mainMenuPanel, "MenuBtn500", mw * 0.5, 204, 460, 56,
 		Color.FromRGB(142, 42, 36),
-		"🔥 500 vs 500 EXTREME STRESS TEST (1,000 UNITS)",
+		">> 500 vs 500 EXTREME STRESS TEST (1,000 UNITS)",
 		"Maximum 1,000-Unit Native C++/Lua Engine Torture Test!",
 		function()
 			ResumeBattle(500)
@@ -990,7 +996,7 @@ local function BuildHUD()
 
 	CreateMenuButton(mainMenuPanel, "MenuBtn50", mw * 0.5, 136, 460, 52,
 		Color.FromRGB(52, 68, 98),
-		"▶ 50 vs 50 SKIRMISH (100 UNITS)",
+		">> 50 vs 50 SKIRMISH (100 UNITS)",
 		"Fast Tactical Gladiators & Heavy Centurion Commanders",
 		function()
 			ResumeBattle(50)
@@ -999,7 +1005,7 @@ local function BuildHUD()
 
 	CreateMenuButton(mainMenuPanel, "MenuBtnExit", mw * 0.5, 72, 460, 50,
 		Color.FromRGB(58, 36, 32),
-		"✕ EXIT COLOSSEUM",
+		"[X] EXIT COLOSSEUM",
 		"Dispatches ServerSignal '" .. EXIT_SIGNAL_NAME .. "' with Total Kills",
 		function()
 			ExitBattle()
@@ -1007,8 +1013,8 @@ local function BuildHUD()
 	)
 
 	NewText(mainMenuPanel, "MenuFooter",
-		"KEYS: [1-4] Scale • [R] Tactic • [SPACE] New Wave • [LMB] Shockwave • [X] Menu",
-		mw * 0.5, 24, mw - 24, 24, 12, PALETTE.hudMuted)
+		"KEYS: [1-4] Scale  |  [R] Tactic  |  [SPACE] New Wave  |  [LMB] Shockwave  |  [X] Menu",
+		mw * 0.5, 24, mw - 24, 30, 12, PALETTE.hudMuted)
 end
 
 ShowMainMenu = function()

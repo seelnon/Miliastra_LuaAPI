@@ -42,19 +42,38 @@
 --    * NewImage(parent, name, x, y, width, height, color, resId, softEdge):
 --        Instantiates IMAGE_TEMPLATE, calls Configure, sets Stretch image, color, optional softEdge.
 --    * NewText(parent, name, text, x, y, width, height, size, textColor, bgColor):
---        Enforces: local fontSize = math.max(12, size or 16)
---                  local textHeight = math.max(height or 28, fontSize * 2)
+--        IMPORTANT: `parent` MUST be a `ClientUIContainerControl` (`CONTAINER_TEMPLATE`), NEVER a `BUTTON_TEMPLATE`!
+--        Enforces: local fontSize = math.max(12, math.min(size or 16, 72))
+--                  local textHeight = math.max(height or 30, fontSize * 2 + 6, 30)
 --        Sets alignment, color, fontSize, adaptiveFontSize = false, then .text = text, and :SetAsLastSibling().
 --    * CreateMenuOptionButton(parent, name, x, y, width, height, bgColor, title, subtitle, onClick):
---        Instantiates BUTTON_TEMPLATE + child Image background + title & subtitle TextBoxes + click listener.
+--        `parent` MUST be a `ContainerControl` (e.g. `mainMenuPanel` or `hudLayer`).
+--        1. Instantiates background & border `ImageControl`s in `parent` at `(x, y)`
+--        2. Instantiates `BUTTON_TEMPLATE` in `parent` at `(x, y)` as the interactive hull
+--        3. Instantiates `title` & `subtitle` `TextBoxControl`s in `parent` ON TOP OF the button (`SetAsLastSibling()`)!
 --
--- 4. STRICT TEXTBOX ENGINE RULES (PREVENT "Font size limit exceeded"):
---    * Minimum valid .fontSize in Genshin is 12! Any .fontSize < 12 (e.g. 8, 9, 10, 11)
---      triggers runtime error: "<script>:<line>: Font size limit exceeded." and causes texts to fail!
---    * Always clamp: local fontSize = math.max(12, math.min(size or 16, 72))
---    * Never set .minimumFontSize < 12 (or omit .minimumFontSize entirely when adaptiveFontSize = false).
---    * Always size the TextBox height to at least math.max(height, fontSize * 2) with SetPivot(0.5, 0.5)
---      so Genshin's font line-height (~2.0-2.1x fontSize) never vertically overflows or clips.
+-- 4. STRICT TEXTBOX & PROCEDURAL BUTTON RULES (PREVENT INVISIBLE TEXT & "Font size limit exceeded"):
+--    * RULE A — NEVER PARENT `TextBox` INSIDE `PresetButton` (`BUTTON_TEMPLATE`):
+--      - `ClientUIPresetButtonControl` (`BUTTON_TEMPLATE = 1073741854`) is ONLY an "interactive hull".
+--      - In the Miliastra Editor, a PresetButton features attachments to 4 internal state slots
+--        (Normal, Hover, Pressed, Disabled) which CANNOT be configured procedurally via Lua code.
+--      - If you call `game.InstantiateClientUIControl(TEXT_TEMPLATE, btn)` with `btn` (`BUTTON_TEMPLATE`)
+--        as the parent, Genshin Impact throws NO error, but the text will NOT render on the button!
+--      - Always parent button `Image`s and `TextBox`es to the `ContainerControl` (`parent`), and create
+--        the `TextBox` AFTER (`ON TOP OF`, via `:SetAsLastSibling()`) the `PresetButton` interactive hull!
+--      - Because `ClientUITextBoxControl` has NO `.raycastTarget`, cursor clicks pass straight through
+--        the `TextBox` label on top directly into the `PresetButton` hull underneath!
+--    * RULE B — FONT SIZE >= 12 ("Font size limit exceeded." GUARDRAIL):
+--      - Minimum valid `.fontSize` in Genshin is `12`! Any `.fontSize < 12` (e.g. 8, 9, 10, 11)
+--        triggers runtime error: `"<script>:<line>: Font size limit exceeded."` and causes texts to fail!
+--      - Always clamp: `local fontSize = math.max(12, math.min(size or 16, 72))`
+--      - Never set `.minimumFontSize < 12` (or omit `.minimumFontSize` entirely when `adaptiveFontSize = false`).
+--    * RULE C — TEXTBOX VERTICAL LINE-HEIGHT CULLING (`textHeight >= fontSize * 2 + 6, 30`):
+--      - Genshin's default font (`HYWenHei-85W`) has a vertical line-height of `~2.15x * fontSize`.
+--      - If a `TextBox`'s vertical height (`sizeDeltaY`) is smaller than 1 full line height (e.g. `24px` at
+--        `fontSize = 12` or `28px` at `fontSize = 14`) with `adaptiveFontSize = false`, Genshin's text engine
+--        silently culls the entire line of text with NO error in the UI!
+--      - Always enforce: `local textHeight = math.max(height or 30, fontSize * 2 + 6, 30)` with `SetPivot(0.5, 0.5)`.
 --
 -- 5. PERFORMANCE, INSTANT LOADING & ZERO-GC OPTIMIZATION TECH:
 --    * CONTROL INSTANTIATION BUDGET:
@@ -82,8 +101,10 @@
 --          root.showCursor = true
 --    * ClientUIPresetButtonControl:
 --      - HAS NO background color (.bgColor), NO image (.imageColor), NO text (.text)!
---      - To give a button a visual background or label, instantiate a child
---        ClientUIImageControl and ClientUITextBoxControl inside/under the button.
+--      - It is strictly an "interactive hull" (its 4 state attachments can only be set in the Editor, not Lua).
+--      - NEVER pass a `PresetButton` as the `parent` of a procedural `TextBox` (`TEXT_TEMPLATE`)!
+--      - Instead, parent the background `ImageControl`, the `PresetButtonControl` hull, and the `TextBoxControl`
+--        label to the same `ContainerControl`, creating the `TextBoxControl` ON TOP OF the `PresetButtonControl`!
 --    * .interactable (boolean) ONLY EXISTS ON:
 --      - ClientUIPresetButtonControl, ClientUITextWindowControl, ClientUIGridScrollerControl
 --    * .raycastTarget (boolean) ONLY EXISTS ON:
@@ -380,8 +401,11 @@ function OnStart()
     --      triggers runtime error: "<script>:<line>: Font size limit exceeded." and causes texts to fail!
     --   2. Always clamp: local fontSize = math.max(12, size or 16)
     --   3. Always size the TextBox height to at least math.max(height, fontSize * 2 + 6, 30)
-    --      with SetPivot(0.5, 0.5) so Genshin's CJK/Unicode font line-height (~2.1x fontSize)
-    --      never vertically overflows or gets culled inside a tight box.
+    --      with SetPivot(0.5, 0.5) so Genshin's CJK/Unicode font line-height (~2.15x fontSize)
+    --      never vertically overflows or gets silently culled inside a tight box.
+    --   4. NEVER parent a TextBox inside a PresetButton (`BUTTON_TEMPLATE`)! PresetButton is ONLY
+    --      an "interactive hull" (its 4 state attachments are Editor-only). Always parent TextBox
+    --      to a `ContainerControl` (`CONTAINER_TEMPLATE`) ON TOP OF the PresetButton (`SetAsLastSibling()`).
     -- ------------------------------------------------------------------------
     local textBoxCtrl = game.InstantiateClientUIControl(TEMPLATE_TEXTBOX, containerCtrl)
     textBoxCtrl.name = "TextBoxControlSpec"
@@ -425,7 +449,7 @@ function OnStart()
     textWinCtrl.interactable        = true                                   -- boolean [Read/Write] (Scroll input enabled)
     textWinCtrl.showScrollBar       = true                                   -- boolean [Read/Write]
     textWinCtrl.text                = "ClientUITextWindowControl\nScrollable text window (.interactable + .showScrollBar + .bgColor)"
-    textWinCtrl.fontSize            = 13                                     -- integer [Read/Write/Tweenable]
+    textWinCtrl.fontSize            = 13                                     -- integer [Read/Write/Tweenable] (MUST be >= 12)
     textWinCtrl.fontColor           = Color.FromRGBA(215, 195, 150, 255)     -- ColorValue [Read/Write/Tweenable]
     textWinCtrl.bgColor             = Color.FromRGBA(36, 30, 23, 255)        -- ColorValue [Read/Write/Tweenable]
     textWinCtrl.enableOutline       = false                                  -- boolean [Read/Write]
@@ -433,29 +457,23 @@ function OnStart()
     textWinCtrl.horizontalAlignment = Enum.TextHorizontalAlignment.Middle    -- [Read/Write]
     textWinCtrl.verticalAlignment   = Enum.TextVerticalAlignment.Middle      -- [Read/Write]
     textWinCtrl.adaptiveFontSize    = false                                  -- boolean [Read/Write]
-    textWinCtrl.minimumFontSize     = 10                                     -- integer [Read/Write/Tweenable]
+    textWinCtrl.minimumFontSize     = 12                                     -- integer [Read/Write/Tweenable] (MUST be >= 12)
 
     -- ------------------------------------------------------------------------
-    -- TYPE 5: ClientUIPresetButtonControl (Interactive Button)
+    -- TYPE 5: ClientUIPresetButtonControl (Interactive Button Hull)
     -- Source: library/client_controls/PresetButtonControl.d.lua
     -- Inherits: ClientUIBaseControl
-    -- CRITICAL RULE: PresetButton has NO .bgColor, NO .imageColor, NO .text!
-    -- Always pair with a TextBoxControl (using .bgColor) or ImageControl for visuals.
+    -- CRITICAL PROCEDURAL BUTTON & TEXT RULE:
+    --   1. PresetButton has NO .bgColor, NO .imageColor, NO .text! It is ONLY an "interactive hull".
+    --   2. In Miliastra Editor, a PresetButton has 4 state attachments (Normal, Hover, Pressed, Disabled)
+    --      which CANNOT be configured procedurally in Lua code.
+    --   3. NEVER pass `presetBtn` as the `parent` of `game.InstantiateClientUIControl(TEMPLATE_TEXTBOX, presetBtn)`!
+    --      Doing so produces NO error in Genshin UI, but the text will NOT render!
+    --   4. Always instantiate `presetBtn` in `containerCtrl` FIRST, and instantiate `btnVisualLabel`
+    --      (`TEMPLATE_TEXTBOX`) in `containerCtrl` SECOND (ON TOP OF `presetBtn` via `:SetAsLastSibling()`).
+    --      Because `TextBoxControl` has NO `.raycastTarget`, clicks pass right through the text to `presetBtn`!
     -- ------------------------------------------------------------------------
-    -- Step A: Create visual button background + label using ClientUITextBoxControl
-    local btnVisualLabel = game.InstantiateClientUIControl(TEMPLATE_TEXTBOX, containerCtrl)
-    btnVisualLabel.name = "PresetButtonVisualBacking"
-    btnVisualLabel:SetAnchorMin(0.5, 0.5)
-    btnVisualLabel:SetAnchorMax(0.5, 0.5)
-    btnVisualLabel:SetPivot(0.5, 0.5)
-    btnVisualLabel:SetAnchoredPosition(200, 0)
-    btnVisualLabel:SetSizeDelta(380, 92)
-    btnVisualLabel.bgColor = Color.FromRGBA(78, 58, 34, 255)
-    btnVisualLabel.fontColor = Color.FromRGB(245, 222, 168)
-    btnVisualLabel.fontSize = 14
-    btnVisualLabel.text = "[ CLICK PRESET BUTTON ]\n(Visual bg via TextBox.bgColor + PresetButton overlay)"
-
-    -- Step B: Create ClientUIPresetButtonControl on top for interaction
+    -- Step A: Create ClientUIPresetButtonControl interactive hull first in containerCtrl
     local presetBtn = game.InstantiateClientUIControl(TEMPLATE_PRESET_BUTTON, containerCtrl)
     presetBtn.name = "PresetButtonControlSpec"
     presetBtn:SetAnchorMin(0.5, 0.5)
@@ -468,6 +486,20 @@ function OnStart()
     presetBtn.interactable  = true -- boolean [Read/Write]
     presetBtn.clickAudioId  = 1001 -- integer [Read/Write]
     presetBtn.raycastTarget = true -- boolean [Read/Write]
+
+    -- Step B: Create visual button background + label ON TOP OF presetBtn in containerCtrl!
+    local btnVisualLabel = game.InstantiateClientUIControl(TEMPLATE_TEXTBOX, containerCtrl)
+    btnVisualLabel.name = "PresetButtonVisualBacking"
+    btnVisualLabel:SetAnchorMin(0.5, 0.5)
+    btnVisualLabel:SetAnchorMax(0.5, 0.5)
+    btnVisualLabel:SetPivot(0.5, 0.5)
+    btnVisualLabel:SetAnchoredPosition(200, 0)
+    btnVisualLabel:SetSizeDelta(380, 92)
+    btnVisualLabel.bgColor = Color.FromRGBA(78, 58, 34, 255)
+    btnVisualLabel.fontColor = Color.FromRGB(245, 222, 168)
+    btnVisualLabel.fontSize = 14
+    btnVisualLabel.text = "[ CLICK PRESET BUTTON ]\n(TextBox created ON TOP of PresetButton hull in Container)"
+    btnVisualLabel:SetAsLastSibling()
 
     -- PresetButtonControl Methods:
     local tempClickHandler = function(eventData) end
@@ -843,13 +875,14 @@ function OnStart()
         return img
     end
 
-    -- Always compute local `fontSize >= 12` and `textHeight = math.max(h, fontSize * 2)` first,
+    -- Always compute local `fontSize >= 12` and `textHeight = math.max(h or 30, fontSize * 2 + 6, 30)` first,
     -- configure alignment/color/fontSize BEFORE assigning `.text`, then `:SetVisible(true)` and `:SetAsLastSibling()`.
+    -- CRITICAL: `parent` MUST be a `ContainerControl` (`TEMPLATE_CONTAINER`), NEVER a `PresetButton` (`TEMPLATE_PRESET_BUTTON`)!
     local function CreateVerifiedText(parent, name, text, x, y, w, h, size, textColor, bgColor)
         local lbl = game.InstantiateClientUIControl(TEMPLATE_TEXTBOX, parent)
         if not lbl then return nil end
         local fontSize = math.max(12, math.min(size or 14, 72))
-        local textHeight = math.max(h or 28, fontSize * 2)
+        local textHeight = math.max(h or 30, fontSize * 2 + 6, 30)
         Configure(lbl, x, y, w, textHeight, name)
         lbl.fontSize = fontSize
         lbl.fontColor = textColor or Color.FromRGB(230, 205, 145)
@@ -863,19 +896,24 @@ function OnStart()
         return lbl
     end
 
+    -- Procedural Button Factory:
+    -- `parent` MUST be a `ContainerControl`.
+    -- 1. Creates background & border `ImageControl`s in `parent` at `(x, y)`
+    -- 2. Creates `PresetButton` interactive hull in `parent` at `(x, y)`
+    -- 3. Creates `TextBox` title & subtitle in `parent` ON TOP OF `btn` (`SetAsLastSibling()`)!
     local function CreateVerifiedMenuButton(parent, name, x, y, w, h, bgCol, titleTxt, subTxt, onClick)
+        CreateVerifiedImage(parent, name .. "_Bg", x, y, w, h, bgCol, ASSET_RECTANGLE, true)
+        CreateVerifiedImage(parent, name .. "_Border", x, y + h * 0.5 - 2, w - 8, 2, Color.FromRGB(238, 217, 171), ASSET_RECTANGLE, false)
         local btn = game.InstantiateClientUIControl(TEMPLATE_PRESET_BUTTON, parent)
         if not btn then return nil end
         Configure(btn, x, y, w, h, name)
         btn.interactable = true
         btn.raycastTarget = true
-        CreateVerifiedImage(btn, name .. "_Bg", 0, 0, w, h, bgCol, ASSET_RECTANGLE, true)
-        CreateVerifiedImage(btn, name .. "_Border", 0, h * 0.5 - 2, w - 8, 2, Color.FromRGB(238, 217, 171), ASSET_RECTANGLE, false)
         if subTxt and subTxt ~= "" then
-            CreateVerifiedText(btn, name .. "_Title", titleTxt, 0, h * 0.18, w - 16, 24, 13, Color.FromRGB(255, 255, 255))
-            CreateVerifiedText(btn, name .. "_Sub", subTxt, 0, -h * 0.22, w - 16, 24, 12, Color.FromRGB(238, 217, 171))
+            CreateVerifiedText(parent, name .. "_Title", titleTxt, x, y + h * 0.18, w - 16, 30, 14, Color.FromRGB(255, 255, 255))
+            CreateVerifiedText(parent, name .. "_Sub", subTxt, x, y - h * 0.20, w - 16, 30, 12, Color.FromRGB(238, 217, 171))
         else
-            CreateVerifiedText(btn, name .. "_Title", titleTxt, 0, 0, w - 16, 26, 13, Color.FromRGB(255, 255, 255))
+            CreateVerifiedText(parent, name .. "_Title", titleTxt, x, y, w - 16, 30, 13, Color.FromRGB(255, 255, 255))
         end
         btn:AddCursorEventListener(Enum.CursorEventType.CursorClick, function()
             if onClick then onClick() end

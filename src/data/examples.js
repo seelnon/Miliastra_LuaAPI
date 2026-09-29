@@ -118,9 +118,9 @@ export const exampleDefinitions = [
   },
   {
     id: "battle_test",
-    title: "Chess Game vs 250 ELO Bot",
+    title: "How many is 'Yes'?",
     filename: "lua_examples/battle_test.lua",
-    thumbnail: "./lua_examples/img/chess.jpg",
+    thumbnail: "./lua_examples/img/big_battle.jpg",
     category: "Physics & Mechanics",
     tags: ["Playable Game", "1000-Unit Benchmark", "O(N) Spatial Hash Grid", "Structure-of-Arrays", "1280x720 HD", "60 FPS Stress Test"],
     description: "Top-down Colosseum army battle benchmark testing 50v50 (100), 100v100 (200), 250v250 (500), and 500v500 (1,000) simultaneous colliding warriors at 60 FPS using a zero-allocation O(N) linked-list Spatial Hash Grid and Structure-of-Arrays (SoA) Lua tables."
