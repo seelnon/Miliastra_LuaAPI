@@ -967,15 +967,12 @@ local function BuildHUD()
 	NewImage(mainMenuPanel, "MenuTopGold", mw * 0.5, mh - 3, mw - 8, 4,
 		PALETTE.hudGold, RECTANGLE_RESOURCE, false)
 
-	NewText(mainMenuPanel, "MenuTitle", "⚔️ COLOSSEUM MASSIVE BATTLE",
-		mw * 0.5, mh - 34, mw - 32, 32, 18, PALETTE.hudGold)
-	NewText(mainMenuPanel, "MenuSub", "60 FPS LUA -> C++ SPATIAL HASH BENCHMARK (1280x720 HD)",
-		mw * 0.5, mh - 62, mw - 32, 24, 12, PALETTE.hudWhite)
+	NewText(mainMenuPanel, "MenuTitle", "⚔️ COLOSSEUM MASSIVE BATTLE"
+		mw * 0.5, mh - 34, mw - 32, 32, 18, PALETTE.hudGold),
 
 	CreateMenuButton(mainMenuPanel, "MenuBtn100", mw * 0.5, 340, 460, 56,
 		Color.FromRGB(46, 88, 56),
-		"▶ 100 vs 100 COLOSSEUM CLASH (200 UNITS)",
-		"Smooth 60 FPS Standard Army Scale • O(N) Spatial Grid",
+		"▶ 100 vs 100 COLOSSEUM CLASH (200 UNITS)"
 		function()
 			ResumeBattle(100)
 		end
@@ -983,8 +980,7 @@ local function BuildHUD()
 
 	CreateMenuButton(mainMenuPanel, "MenuBtn250", mw * 0.5, 272, 460, 56,
 		Color.FromRGB(124, 84, 34),
-		"▶ 250 vs 250 GRAND LEGION WAR (500 UNITS)",
-		"500 Simultaneous Colliding & Fighting Warriors",
+		"▶ 250 vs 250 GRAND LEGION WAR (500 UNITS)"
 		function()
 			ResumeBattle(250)
 		end
@@ -992,8 +988,7 @@ local function BuildHUD()
 
 	CreateMenuButton(mainMenuPanel, "MenuBtn500", mw * 0.5, 204, 460, 56,
 		Color.FromRGB(142, 42, 36),
-		"🔥 500 vs 500 EXTREME STRESS TEST (1,000 UNITS)",
-		"Maximum 1,000-Unit Native C++/Lua Engine Torture Test!",
+		"🔥 500 vs 500 EXTREME STRESS TEST (1,000 UNITS)"
 		function()
 			ResumeBattle(500)
 		end
@@ -1001,8 +996,7 @@ local function BuildHUD()
 
 	CreateMenuButton(mainMenuPanel, "MenuBtn50", mw * 0.5, 136, 460, 52,
 		Color.FromRGB(52, 68, 98),
-		"▶ 50 vs 50 SKIRMISH (100 UNITS)",
-		"Fast Tactical Gladiators & Heavy Centurion Commanders",
+		"▶ 50 vs 50 SKIRMISH (100 UNITS)"
 		function()
 			ResumeBattle(50)
 		end
@@ -1011,7 +1005,6 @@ local function BuildHUD()
 	CreateMenuButton(mainMenuPanel, "MenuBtnExit", mw * 0.5, 72, 460, 50,
 		Color.FromRGB(58, 36, 32),
 		"✕ EXIT COLOSSEUM",
-		"Dispatches ServerSignal '" .. EXIT_SIGNAL_NAME .. "' with Total Kills",
 		function()
 			ExitBattle()
 		end
