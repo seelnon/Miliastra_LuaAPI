@@ -117,6 +117,15 @@ export const exampleDefinitions = [
     description: "Complete chess engine where you play White against a 3-ply Alpha-Beta 250 ELO Black bot. Features legal move indicator dots & capture rings, Kingside/Queenside castling, En Passant, pawn promotion, and Check/Checkmate detection."
   },
   {
+    id: "battle_test",
+    title: "Chess Game vs 250 ELO Bot",
+    filename: "lua_examples/battle_test.lua",
+    thumbnail: "./lua_examples/img/chess.jpg",
+    category: "Physics & Mechanics",
+    tags: ["Playable Game", "1000-Unit Benchmark", "O(N) Spatial Hash Grid", "Structure-of-Arrays", "1280x720 HD", "60 FPS Stress Test"],
+    description: "Top-down Colosseum army battle benchmark testing 50v50 (100), 100v100 (200), 250v250 (500), and 500v500 (1,000) simultaneous colliding warriors at 60 FPS using a zero-allocation O(N) linked-list Spatial Hash Grid and Structure-of-Arrays (SoA) Lua tables."
+  },
+  {
     id: "physics_pool",
     title: "2D Physics Pool Simulation",
     filename: "lua_examples/physics_parent.lua",
