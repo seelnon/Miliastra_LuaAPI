@@ -967,8 +967,10 @@ local function BuildHUD()
 	NewImage(mainMenuPanel, "MenuTopGold", mw * 0.5, mh - 3, mw - 8, 4,
 		PALETTE.hudGold, RECTANGLE_RESOURCE, false)
 
-	NewText(mainMenuPanel, "MenuTitle", "⚔️ COLOSSEUM MASSIVE BATTLE"
-		mw * 0.5, mh - 34, mw - 32, 32, 18, PALETTE.hudGold),
+	NewText(mainMenuPanel, "MenuTitle", "⚔️ COLOSSEUM MASSIVE BATTLE",
+		mw * 0.5, mh - 34, mw - 32, 32, 18, PALETTE.hudGold)
+	NewText(mainMenuPanel, "MenuSub", "BENCHMARK",
+		mw * 0.5, mh - 62, mw - 32, 24, 12, PALETTE.hudWhite)
 
 	CreateMenuButton(mainMenuPanel, "MenuBtn100", mw * 0.5, 340, 460, 56,
 		Color.FromRGB(46, 88, 56),
