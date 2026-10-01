@@ -248,10 +248,10 @@ export function renderScratchpad(container, initialCode = '') {
   let initialIdx = 0;
   if (!initialCode && savedActiveId) {
     const foundIdx = SNIPPETS.findIndex(s => s.id === savedActiveId);
-    if (foundIdx !== -1) {
-      initialIdx = foundIdx;
-    }
+    if (foundIdx !== -1) initialIdx = foundIdx;
   }
+  let currentSnippetIdx = initialCode ? -1 : initialIdx;
+  
 
   const defaultSnippet = SNIPPETS[initialIdx] || SNIPPETS[0];
   const defaultCode = initialCode || defaultSnippet.code;
@@ -363,14 +363,9 @@ export function renderScratchpad(container, initialCode = '') {
   let persistTimerId = null;
 
   const flushPersistCurrentBufferToCache = () => {
-    if (persistTimerId !== null) {
-      clearTimeout(persistTimerId);
-      persistTimerId = null;
-    }
-    const val = select.value;
-    if (val === '') return;
-    const idx = parseInt(val, 10);
-    const activeSnip = SNIPPETS[idx];
+    if (persistTimerId !== null) { clearTimeout(persistTimerId); persistTimerId = null; }
+    if (currentSnippetIdx < 0 || currentSnippetIdx >= SNIPPETS.length) return;
+    const activeSnip = SNIPPETS[currentSnippetIdx];
     if (!activeSnip) return;
 
     activeSnip.code = docModel.text;
@@ -385,18 +380,11 @@ export function renderScratchpad(container, initialCode = '') {
   };
 
   const persistCurrentBufferToCache = () => {
-    const val = select.value;
-    if (val !== '') {
-      const idx = parseInt(val, 10);
-      const activeSnip = SNIPPETS[idx];
-      if (activeSnip) {
-        activeSnip.code = docModel.text;
-        activeSnip._loaded = true;
-      }
+    if (currentSnippetIdx >= 0 && currentSnippetIdx < SNIPPETS.length) {
+      const activeSnip = SNIPPETS[currentSnippetIdx];
+      if (activeSnip) { activeSnip.code = docModel.text; activeSnip._loaded = true; }
     }
-    if (persistTimerId !== null) {
-      clearTimeout(persistTimerId);
-    }
+    if (persistTimerId !== null) clearTimeout(persistTimerId);
     persistTimerId = setTimeout(flushPersistCurrentBufferToCache, 320);
   };
 
@@ -914,7 +902,8 @@ export function renderScratchpad(container, initialCode = '') {
       const idx = parseInt(val, 10);
       const selectedSnippet = SNIPPETS[idx];
       if (!selectedSnippet) return;
-
+      
+      currentSnippetIdx = idx;
       setSavedActiveSnippetId(selectedSnippet.id);
 
       if (sourceFileEl) {
@@ -938,7 +927,13 @@ export function renderScratchpad(container, initialCode = '') {
       textarea.scrollTop = 0;
       textarea.scrollLeft = 0;
       updateEditor(true);
-      showToast(`Loaded: ${selectedSnippet.name}`);
+
+      const loadedOk = selectedSnippet.isUserDoc || selectedSnippet._loaded;
+      if (loadedOk) {
+        showToast(`Loaded: ${selectedSnippet.name}`);
+      } else {
+        showToast(`Could not load ${selectedSnippet.filename}`, 'error');
+      }
     } else if (deleteDocBtn) {
       deleteDocBtn.style.display = 'none';
     }
@@ -991,6 +986,7 @@ export function renderScratchpad(container, initialCode = '') {
     SNIPPETS.unshift(newDoc);
     saveUserDocsToStorage();
     setSavedActiveSnippetId(newDoc.id);
+    currentSnippetIdx = 0;
 
     // Refresh <select> options and select the newly created snippet (index 0)
     select.innerHTML = renderSelectOptionsHTML(0);
@@ -1052,8 +1048,8 @@ export function renderScratchpad(container, initialCode = '') {
       saveUserDocsToStorage();
 
       const nextIdx = Math.min(idx, SNIPPETS.length - 1);
+      currentSnippetIdx = nextIdx;
       const nextSnip = SNIPPETS[nextIdx];
-      setSavedActiveSnippetId(nextSnip ? nextSnip.id : '');
 
       select.innerHTML = renderSelectOptionsHTML(nextIdx >= 0 ? nextIdx : -1);
       if (nextSnip) {
