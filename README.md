@@ -2,4 +2,4 @@
 
 Miliastra Wonderland .lua API references + examples + basic simulation (needs more testing)
 
-Derived from 'library' -> https://github.com/haminpants/mililua <-
+Derived from 'library' -> https://github.com/haminpants/miliastra-lua-api <-
