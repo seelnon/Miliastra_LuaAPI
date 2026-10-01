@@ -305,3 +305,210 @@ export function highlightEnumItem(fullName) {
   }
   return `<span class="hl-enum-val">${escapeHtml(fullName)}</span>`;
 }
+
+function isIdentStartCode(c) {
+  return (c >= 65 && c <= 90) || (c >= 97 && c <= 122) || c === 95;
+}
+
+function isIdentPartCode(c) {
+  return (c >= 65 && c <= 90) || (c >= 97 && c <= 122) || (c >= 48 && c <= 57) || c === 95;
+}
+
+function isDigitCode(c) {
+  return c >= 48 && c <= 57;
+}
+
+/**
+ * VSCode-style single-line incremental tokenizer.
+ * Tokenizes a single line given `entryState`:
+ *   0 = normal code
+ *   1 = inside multi-line comment --[[ ... ]]
+ *   2 = inside multi-line string  [[ ... ]]
+ * Returns { html, exitState }.
+ */
+export function highlightSingleLuaLine(line, entryState = 0) {
+  if (!line) {
+    return { html: '', exitState: entryState };
+  }
+
+  let state = entryState;
+  let result = '';
+  let i = 0;
+  const len = line.length;
+
+  while (i < len) {
+    // 1. Inside multi-line comment
+    if (state === 1) {
+      const closeIdx = line.indexOf(']]', i);
+      if (closeIdx === -1) {
+        result += `<span class="hl-com">${escapeHtml(line.slice(i))}</span>`;
+        i = len;
+      } else {
+        result += `<span class="hl-com">${escapeHtml(line.slice(i, closeIdx + 2))}</span>`;
+        i = closeIdx + 2;
+        state = 0;
+      }
+      continue;
+    }
+
+    // 2. Inside multi-line string
+    if (state === 2) {
+      const closeIdx = line.indexOf(']]', i);
+      if (closeIdx === -1) {
+        result += `<span class="hl-str">${escapeHtml(line.slice(i))}</span>`;
+        i = len;
+      } else {
+        result += `<span class="hl-str">${escapeHtml(line.slice(i, closeIdx + 2))}</span>`;
+        i = closeIdx + 2;
+        state = 0;
+      }
+      continue;
+    }
+
+    const code = line.charCodeAt(i);
+
+    // 3. Fast skip consecutive whitespace
+    if (code === 32 || code === 9) {
+      let j = i + 1;
+      while (j < len && (line.charCodeAt(j) === 32 || line.charCodeAt(j) === 9)) j++;
+      result += line.slice(i, j);
+      i = j;
+      continue;
+    }
+
+    // 4. Comment start '--'
+    if (code === 45 && i + 1 < len && line.charCodeAt(i + 1) === 45) {
+      if (i + 3 < len && line.charCodeAt(i + 2) === 91 && line.charCodeAt(i + 3) === 91) {
+        state = 1;
+        const closeIdx = line.indexOf(']]', i + 4);
+        if (closeIdx === -1) {
+          result += `<span class="hl-com">${escapeHtml(line.slice(i))}</span>`;
+          i = len;
+        } else {
+          result += `<span class="hl-com">${escapeHtml(line.slice(i, closeIdx + 2))}</span>`;
+          i = closeIdx + 2;
+          state = 0;
+        }
+      } else if (i + 3 < len && line.charCodeAt(i + 2) === 45 && line.charCodeAt(i + 3) === 64) {
+        result += `<span class="hl-doc">${escapeHtml(line.slice(i))}</span>`;
+        i = len;
+      } else {
+        result += `<span class="hl-com">${escapeHtml(line.slice(i))}</span>`;
+        i = len;
+      }
+      continue;
+    }
+
+    // 5. Multi-line string start '[['
+    if (code === 91 && i + 1 < len && line.charCodeAt(i + 1) === 91) {
+      state = 2;
+      const closeIdx = line.indexOf(']]', i + 2);
+      if (closeIdx === -1) {
+        result += `<span class="hl-str">${escapeHtml(line.slice(i))}</span>`;
+        i = len;
+      } else {
+        result += `<span class="hl-str">${escapeHtml(line.slice(i, closeIdx + 2))}</span>`;
+        i = closeIdx + 2;
+        state = 0;
+      }
+      continue;
+    }
+
+    // 6. Quoted string "..." or '...'
+    if (code === 34 || code === 39) {
+      const quote = code;
+      let j = i + 1;
+      let escaped = false;
+      while (j < len) {
+        const c = line.charCodeAt(j);
+        if (c === 92 && !escaped) {
+          escaped = true;
+        } else if (c === quote && !escaped) {
+          j++;
+          break;
+        } else {
+          escaped = false;
+        }
+        j++;
+      }
+      result += `<span class="hl-str">${escapeHtml(line.slice(i, j))}</span>`;
+      i = j;
+      continue;
+    }
+
+    // 7. Numbers
+    if (isDigitCode(code) || (code === 46 && i + 1 < len && isDigitCode(line.charCodeAt(i + 1)))) {
+      let j = i;
+      if (code === 48 && j + 1 < len && (line.charCodeAt(j + 1) === 120 || line.charCodeAt(j + 1) === 88)) {
+        j += 2;
+        while (j < len) {
+          const c = line.charCodeAt(j);
+          if (isDigitCode(c) || (c >= 65 && c <= 70) || (c >= 97 && c <= 102) || c === 95) j++;
+          else break;
+        }
+      } else {
+        while (j < len) {
+          const c = line.charCodeAt(j);
+          if (isDigitCode(c) || c === 46 || c === 95 || c === 101 || c === 69 || c === 43 || c === 45) j++;
+          else break;
+        }
+      }
+      result += `<span class="hl-num">${escapeHtml(line.slice(i, j))}</span>`;
+      i = j;
+      continue;
+    }
+
+    // 8. Identifiers & Keywords
+    if (isIdentStartCode(code)) {
+      let j = i + 1;
+      while (j < len && isIdentPartCode(line.charCodeAt(j))) j++;
+      const word = line.slice(i, j);
+
+      if (LUA_KEYWORDS.has(word)) {
+        if (word === 'true' || word === 'false' || word === 'nil') {
+          result += `<span class="hl-bool">${word}</span>`;
+        } else {
+          result += `<span class="hl-kw">${word}</span>`;
+        }
+      } else if (LUA_BUILTINS.has(word)) {
+        result += `<span class="hl-builtin">${word}</span>`;
+      } else if (LUA_ENUM_TYPES.has(word)) {
+        result += `<span class="hl-enum-type">${word}</span>`;
+      } else if (LUA_ENUM_ITEMS.has(word)) {
+        result += `<span class="hl-enum-val">${word}</span>`;
+      } else if (LUA_LIFECYCLES.has(word)) {
+        result += `<span class="hl-fn">${word}</span>`;
+      } else if (j < len && line.charCodeAt(j) === 40) { // '('
+        result += `<span class="hl-fn">${word}</span>`;
+      } else if (
+        word.startsWith('ClientUI') ||
+        word === 'Tween' ||
+        word === 'TweenSequence' ||
+        word === 'ServerSignal' ||
+        word === 'Vector3' ||
+        word === 'CursorEventData'
+      ) {
+        result += `<span class="hl-type">${word}</span>`;
+      } else {
+        result += word;
+      }
+      i = j;
+      continue;
+    }
+
+    // 9. Operators & Punctuation
+    if (code === 58 || code === 46) { // ':' or '.'
+      result += `<span class="hl-op">${line[i]}</span>`;
+      i++;
+      continue;
+    }
+
+    if (code === 38) result += '&amp;';
+    else if (code === 60) result += '&lt;';
+    else if (code === 62) result += '&gt;';
+    else result += line[i];
+    i++;
+  }
+
+  return { html: result, exitState: state };
+}

@@ -87,6 +87,170 @@ export const ASSET_SHAPES = {
   hollow_circle: 'hollow_circle'
 };
 
+// 72 Genshin Sticker Resource IDs (4 rows x 18 columns in ./lua_examples/img/stickers_genshin.jpg)
+export const GENSHIN_STICKER_IDS = [
+  // Row 0 (18 stickers: 112001..112018)
+  112001, 112002, 112003, 112004, 112005, 112006, 112007, 112008, 112009,
+  112010, 112011, 112012, 112013, 112014, 112015, 112016, 112017, 112018,
+  // Row 1 (18 stickers: 112019..112036)
+  112019, 112020, 112021, 112022, 112023, 112024, 112025, 112026, 112027,
+  112028, 112029, 112030, 112031, 112032, 112033, 112034, 112035, 112036,
+  // Row 2 (18 stickers: 112037..112054)
+  112037, 112038, 112039, 112040, 112041, 112042, 112043, 112044, 112045,
+  112046, 112047, 112048, 112049, 112050, 112051, 112052, 112053, 112054,
+  // Row 3 (18 stickers: 112055, 112056, 112059..112074)
+  112055, 112056, 112059, 112060, 112061, 112062, 112063, 112064, 112065,
+  112066, 112067, 112068, 112069, 112070, 112071, 112072, 112073, 112074
+];
+
+const STICKER_SPRITE_CACHE = new Map();
+let stickerSheetLoading = false;
+let stickerSheetLoaded = false;
+
+export function ensureGenshinStickersLoaded() {
+  if (stickerSheetLoaded || stickerSheetLoading || typeof document === 'undefined') return;
+  stickerSheetLoading = true;
+
+  const img = new Image();
+  img.crossOrigin = 'anonymous';
+  const candidateUrls = [
+    new URL('../lua_examples/img/stickers_genshin.jpg', import.meta.url).href,
+    './lua_examples/img/stickers_genshin.jpg',
+    'lua_examples/img/stickers_genshin.jpg'
+  ];
+  let urlIdx = 0;
+
+  img.onload = () => {
+    try {
+      const sheetW = img.naturalWidth || 1319;
+      const sheetH = img.naturalHeight || 293;
+      const sheetCanvas = document.createElement('canvas');
+      sheetCanvas.width = sheetW;
+      sheetCanvas.height = sheetH;
+      const sctx = sheetCanvas.getContext('2d', { willReadFrequently: true });
+      sctx.drawImage(img, 0, 0);
+
+      // Sample top-left slate-blue background color (approx RGB 43, 46, 61)
+      const cornerPx = sctx.getImageData(0, 0, 1, 1).data;
+      const bgR = cornerPx[0] || 43;
+      const bgG = cornerPx[1] || 46;
+      const bgB = cornerPx[2] || 61;
+
+      const cellW = 66;
+      const cellH = 66;
+      const visited = new Uint8Array(cellW * cellH);
+      const queue = new Int32Array(cellW * cellH);
+
+      for (let i = 0; i < GENSHIN_STICKER_IDS.length; i++) {
+        const stickerId = GENSHIN_STICKER_IDS[i];
+        const row = Math.floor(i / 18);
+        const col = i % 18;
+        const sx = Math.round(9 + col * 72.72);
+        const sy = Math.round(5 + row * 72.5);
+
+        const cellData = sctx.getImageData(sx, sy, cellW, cellH);
+        const data = cellData.data;
+        visited.fill(0);
+        let qHead = 0;
+        let qTail = 0;
+
+        const tryEnqueue = (px, py) => {
+          if (px < 0 || px >= cellW || py < 0 || py >= cellH) return;
+          const idx = py * cellW + px;
+          if (visited[idx]) return;
+          const p4 = idx * 4;
+          const diff = Math.abs(data[p4] - bgR) + Math.abs(data[p4 + 1] - bgG) + Math.abs(data[p4 + 2] - bgB);
+          if (diff <= 52) {
+            visited[idx] = 1;
+            queue[qTail++] = idx;
+          }
+        };
+
+        // Seed flood-fill from cell perimeter
+        for (let x = 0; x < cellW; x++) {
+          tryEnqueue(x, 0);
+          tryEnqueue(x, cellH - 1);
+        }
+        for (let y = 1; y < cellH - 1; y++) {
+          tryEnqueue(0, y);
+          tryEnqueue(cellW - 1, y);
+        }
+
+        while (qHead < qTail) {
+          const curr = queue[qHead++];
+          const cx = curr % cellW;
+          const cy = (curr / cellW) | 0;
+          data[curr * 4 + 3] = 0; // Transparent background
+          tryEnqueue(cx - 1, cy);
+          tryEnqueue(cx + 1, cy);
+          tryEnqueue(cx, cy - 1);
+          tryEnqueue(cx, cy + 1);
+        }
+
+        // Soft 1px anti-aliased edge feathering along flood-fill boundary
+        for (let y = 1; y < cellH - 1; y++) {
+          for (let x = 1; x < cellW - 1; x++) {
+            const idx = y * cellW + x;
+            if (!visited[idx]) {
+              const adjBg = visited[idx - 1] + visited[idx + 1] + visited[idx - cellW] + visited[idx + cellW];
+              if (adjBg > 0) {
+                const p4 = idx * 4;
+                const diff = Math.abs(data[p4] - bgR) + Math.abs(data[p4 + 1] - bgG) + Math.abs(data[p4 + 2] - bgB);
+                if (diff < 82) {
+                  data[p4 + 3] = Math.min(255, Math.round((diff / 82) * 235));
+                }
+              }
+            }
+          }
+        }
+
+        const spriteCanvas = document.createElement('canvas');
+        spriteCanvas.width = cellW;
+        spriteCanvas.height = cellH;
+        const cctx = spriteCanvas.getContext('2d');
+        cctx.putImageData(cellData, 0, 0);
+
+        // Pre-bake white/gold hit-flash silhouette canvas for zero-allocation combat hit flashes
+        const flashCanvas = document.createElement('canvas');
+        flashCanvas.width = cellW;
+        flashCanvas.height = cellH;
+        const fctx = flashCanvas.getContext('2d');
+        fctx.drawImage(spriteCanvas, 0, 0);
+        fctx.globalCompositeOperation = 'source-in';
+        fctx.fillStyle = '#fff9e6';
+        fctx.fillRect(0, 0, cellW, cellH);
+
+        STICKER_SPRITE_CACHE.set(stickerId, {
+          canvas: spriteCanvas,
+          flashCanvas
+        });
+      }
+
+      stickerSheetLoaded = true;
+      stickerSheetLoading = false;
+    } catch (e) {
+      console.warn('[Sticker Slicer] Failed to slice stickers_genshin.jpg:', e);
+      stickerSheetLoading = false;
+    }
+  };
+
+  img.onerror = () => {
+    urlIdx++;
+    if (urlIdx < candidateUrls.length) {
+      img.src = candidateUrls[urlIdx];
+    } else {
+      stickerSheetLoading = false;
+    }
+  };
+
+  img.src = candidateUrls[0];
+}
+
+// Start preloading sticker sheet immediately in browser
+if (typeof window !== 'undefined') {
+  ensureGenshinStickersLoaded();
+}
+
 /**
  * Normalizes color objects from plain JS or Fengari Lua proxies into { r, g, b, a }
  */
@@ -931,19 +1095,24 @@ export class MiliastraSimulator {
     if (!this.isRunning || this.isPaused) return;
     const now = performance.now();
 
-    // Independent trailing cooldown gates per event type (instant initial press, suppress rapid spam)
-    if (eventType === 1) { // CursorClick
-      if (now - this.lastClickTime < 60) return;
-      this.lastClickTime = now;
-    } else if (eventType === 2) { // CursorDown
-      if (now - this.lastDownTime < 60) return;
-      this.lastDownTime = now;
+    // Trailing cooldown gates for physical user canvas clicks (allow explicit targetControls to always fire)
+    if (!targetControls) {
+      if (eventType === 1) { // CursorClick
+        if (now - this.lastClickTime < 60) return;
+        this.lastClickTime = now;
+      } else if (eventType === 2) { // CursorDown
+        if (now - this.lastDownTime < 60) return;
+        this.lastDownTime = now;
+      }
     }
 
     const controls = targetControls || this.hitTestControls(x, y);
 
     let handled = false;
     for (const ctrl of controls) {
+      if (eventType === 1 && ctrl.clickAudioId && ctrl.clickAudioId > 0) {
+        this.playAudioEffect(ctrl.clickAudioId);
+      }
       const listeners = ctrl.cursorListeners[eventType];
       if (listeners && listeners.length > 0) {
         for (const cbId of listeners) {
@@ -956,6 +1125,152 @@ export class MiliastraSimulator {
         break;
       }
     }
+  }
+
+  playAudioEffect(audioId) {
+    const id = Number(audioId) || 0;
+    if (id <= 0) return;
+    try {
+      if (!this._audioCtx) {
+        const AudioCtx = window.AudioContext || window.webkitAudioContext;
+        if (AudioCtx) {
+          this._audioCtx = new AudioCtx();
+        }
+      }
+      if (!this._audioCtx) return;
+      if (this._audioCtx.state === 'suspended') {
+        this._audioCtx.resume();
+      }
+      const ctx = this._audioCtx;
+      const now = ctx.currentTime;
+
+      if (id === 50870) { // Button_Press_Heavy (Block Placement / Shoot)
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.type = 'triangle';
+        osc.frequency.setValueAtTime(180, now);
+        osc.frequency.exponentialRampToValueAtTime(45, now + 0.08);
+        gain.gain.setValueAtTime(0.35, now);
+        gain.gain.exponentialRampToValueAtTime(0.001, now + 0.08);
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.start(now);
+        osc.stop(now + 0.08);
+      } else if (id === 40256 || id === 30006 || id === 30065) { // Combat_Hit_Impact_2 (Block Settle / Lock in Grid)
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(260, now);
+        osc.frequency.exponentialRampToValueAtTime(60, now + 0.12);
+        gain.gain.setValueAtTime(0.4, now);
+        gain.gain.exponentialRampToValueAtTime(0.001, now + 0.12);
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.start(now);
+        osc.stop(now + 0.12);
+      } else if (id === 40230 || id === 40143) { // Combat_Hit_Impact_1 (Line Clear)
+        [523.25, 659.25, 783.99].forEach((freq, i) => {
+          const osc = ctx.createOscillator();
+          const gain = ctx.createGain();
+          osc.type = 'sine';
+          osc.frequency.setValueAtTime(freq, now + i * 0.03);
+          gain.gain.setValueAtTime(0.22, now + i * 0.03);
+          gain.gain.exponentialRampToValueAtTime(0.001, now + 0.25 + i * 0.03);
+          osc.connect(gain);
+          gain.connect(ctx.destination);
+          osc.start(now + i * 0.03);
+          osc.stop(now + 0.28 + i * 0.03);
+        });
+      } else if (id === 40237) { // Combat_Hit_Impact_3 (Tetris Quad Clear)
+        const sub = ctx.createOscillator();
+        const subGain = ctx.createGain();
+        sub.type = 'triangle';
+        sub.frequency.setValueAtTime(140, now);
+        sub.frequency.exponentialRampToValueAtTime(35, now + 0.35);
+        subGain.gain.setValueAtTime(0.5, now);
+        subGain.gain.exponentialRampToValueAtTime(0.001, now + 0.35);
+        sub.connect(subGain);
+        subGain.connect(ctx.destination);
+        sub.start(now);
+        sub.stop(now + 0.35);
+
+        [523.25, 659.25, 783.99, 1046.50].forEach((freq, i) => {
+          const osc = ctx.createOscillator();
+          const gain = ctx.createGain();
+          osc.type = 'triangle';
+          osc.frequency.setValueAtTime(freq, now + i * 0.04);
+          gain.gain.setValueAtTime(0.25, now + i * 0.04);
+          gain.gain.exponentialRampToValueAtTime(0.001, now + 0.45);
+          osc.connect(gain);
+          gain.connect(ctx.destination);
+          osc.start(now + i * 0.04);
+          osc.stop(now + 0.48);
+        });
+      } else if (id === 50923) { // Block Spawned on Top (Panic Timer Expired)
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.type = 'sawtooth';
+        osc.frequency.setValueAtTime(540, now);
+        osc.frequency.exponentialRampToValueAtTime(110, now + 0.18);
+        gain.gain.setValueAtTime(0.3, now);
+        gain.gain.exponentialRampToValueAtTime(0.001, now + 0.18);
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.start(now);
+        osc.stop(now + 0.18);
+
+        const sub = ctx.createOscillator();
+        const subGain = ctx.createGain();
+        sub.type = 'triangle';
+        sub.frequency.setValueAtTime(160, now + 0.06);
+        sub.frequency.exponentialRampToValueAtTime(50, now + 0.22);
+        subGain.gain.setValueAtTime(0.35, now + 0.06);
+        subGain.gain.exponentialRampToValueAtTime(0.001, now + 0.22);
+        sub.connect(subGain);
+        subGain.connect(ctx.destination);
+        sub.start(now + 0.06);
+        sub.stop(now + 0.22);
+      } else if (id === 50926) { // Timer in the Red Reminder ID (Crisp, subtle dual alert chime)
+        const freqs = [880, 1174.66];
+        freqs.forEach((freq, i) => {
+          const osc = ctx.createOscillator();
+          const gain = ctx.createGain();
+          osc.type = 'sine';
+          osc.frequency.setValueAtTime(freq, now + i * 0.07);
+          gain.gain.setValueAtTime(0.18, now + i * 0.07);
+          gain.gain.exponentialRampToValueAtTime(0.001, now + i * 0.07 + 0.06);
+          osc.connect(gain);
+          gain.connect(ctx.destination);
+          osc.start(now + i * 0.07);
+          osc.stop(now + i * 0.07 + 0.065);
+        });
+      } else if (id === 50920) { // Game Over Alert
+        [392.00, 349.23, 329.63, 261.63].forEach((freq, i) => {
+          const osc = ctx.createOscillator();
+          const gain = ctx.createGain();
+          osc.type = 'sawtooth';
+          osc.frequency.setValueAtTime(freq, now + i * 0.11);
+          gain.gain.setValueAtTime(0.22, now + i * 0.11);
+          gain.gain.exponentialRampToValueAtTime(0.001, now + i * 0.11 + 0.24);
+          osc.connect(gain);
+          gain.connect(ctx.destination);
+          osc.start(now + i * 0.11);
+          osc.stop(now + i * 0.11 + 0.25);
+        });
+      } else {
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(440, now);
+        osc.frequency.exponentialRampToValueAtTime(220, now + 0.05);
+        gain.gain.setValueAtTime(0.15, now);
+        gain.gain.exponentialRampToValueAtTime(0.001, now + 0.05);
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.start(now);
+        osc.stop(now + 0.05);
+      }
+    } catch {}
   }
 
   dispatchKeyEvent(eventTypes) {
@@ -987,7 +1302,7 @@ export class MiliastraSimulator {
         if (handled) break;
       }
 
-      if (handled || ctrl.disableKeyEventPassthrough) {
+      if (handled) {
         continue;
       }
 
@@ -1461,29 +1776,77 @@ export class MiliastraSimulator {
         },
         KeyboardKeyCode = {
           None = 0,
-          ESC = 1,
-          Number1 = 2, Number2 = 3, Number3 = 4, Number4 = 5, Number5 = 6,
-          Number6 = 7, Number7 = 8, Number8 = 9, Number9 = 10, Number0 = 11,
-          Minus = 12, Equal = 13, BackSpace = 14, Tab = 15,
-          Q = 16, W = 17, E = 18, R = 19, T = 20, Y = 21, U = 22, I = 23, O = 24, P = 25,
-          LeftBracket = 26, RightBracket = 27, Enter = 28, LeftCtrl = 29,
-          A = 30, S = 31, D = 32, F = 33, G = 34, H = 35, J = 36, K = 37, L = 38,
-          Semicolon = 39, Quote = 40, Backquote = 41, LeftShift = 42, Backslash = 43,
-          Z = 44, X = 45, C = 46, V = 47, B = 48, N = 49, M = 50,
-          Comma = 51, Period = 52, Slash = 53, RightShift = 54, LeftAlt = 56, Space = 57,
-          RightAlt = 184, RightCtrl = 157,
-          KeyW = 17, KeyA = 30, KeyS = 31, KeyD = 32, KeyE = 18, KeyF = 33, KeyQ = 16, KeyR = 19
+          Invalid = 0,
+          CharacterSkill1Key = 23,
+          CharacterSkill2Key = 24,
+          CharacterSkill3Key = 11,
+          CharacterSkill4Key = 5,
+          MoveForwardKey = 27,
+          MoveBackwardKey = 28,
+          MoveLeftKey = 29,
+          MoveRightKey = 30,
+          NormalAttackKey = 21,
+          SprintKey = 22,
+          JumpKey = 20,
+          InteractKey = 19,
+          DropKey = 53,
+          OpenShortcutWheelKey = 41,
+          SwitchToWalkOrRunKey = 25,
+          CraftspersonKey1 = 1, CraftspersonKey2 = 2, CraftspersonKey3 = 3, CraftspersonKey4 = 4, CraftspersonKey5 = 6,
+          CraftspersonKey6 = 7, CraftspersonKey7 = 8, CraftspersonKey8 = 9, CraftspersonKey9 = 10, CraftspersonKey10 = 14,
+          CraftspersonKey11 = 22, CraftspersonKey12 = 48, CraftspersonKey13 = 37, CraftspersonKey14 = 12, CraftspersonKey15 = 17,
+          CraftspersonKey16 = 23, CraftspersonKey17 = 24, CraftspersonKey18 = 25, CraftspersonKey19 = 36, CraftspersonKey20 = 18,
+          CraftspersonKey21 = 38, CraftspersonKey22 = 42, CraftspersonKey23 = 60, CraftspersonKey24 = 61, CraftspersonKey25 = 62,
+          CraftspersonKey26 = 63, CraftspersonKey27 = 64, CraftspersonKey28 = 65, CraftspersonKey29 = 13, CraftspersonKey30 = 15,
+          CraftspersonKey31 = 16, CraftspersonKey32 = 26, CraftspersonKey33 = 51, CraftspersonKey34 = 52, CraftspersonKey35 = 53,
+          CraftspersonKey36 = 70, CraftspersonKey37 = 71, CraftspersonKey38 = 72, CraftspersonKey39 = 73, CraftspersonKey40 = 25,
+          CraftspersonKey41 = 22, CraftspersonKey42 = 14, CraftspersonKey43 = 80,
+          ESC = 31,
+          Number1 = 1, Number2 = 2, Number3 = 3, Number4 = 4, Number5 = 6,
+          Number6 = 7, Number7 = 8, Number8 = 9, Number9 = 10, Number0 = 14,
+          Minus = 15, Equal = 16, BackSpace = 14, Tab = 41,
+          Q = 24, W = 27, E = 23, R = 11, T = 5, Y = 37, U = 22, I = 23, O = 24, P = 25,
+          LeftBracket = 26, RightBracket = 27, Enter = 38, LeftCtrl = 25,
+          A = 29, S = 28, D = 30, F = 19, G = 12, H = 17, J = 36, K = 18, L = 38,
+          Semicolon = 39, Quote = 40, Backquote = 13, LeftShift = 22, Backslash = 43,
+          Z = 48, X = 53, C = 33, V = 42, B = 32, N = 49, M = 34,
+          Comma = 51, Period = 52, Slash = 53, RightShift = 22, LeftAlt = 40, Space = 20,
+          RightAlt = 40, RightCtrl = 25,
+          KeyW = 27, KeyA = 29, KeyS = 28, KeyD = 30, KeyE = 23, KeyF = 19, KeyQ = 24, KeyR = 11, KeyX = 53
         },
         ControllerKeyCode = {
           None = 0,
-          DPadUp = 1, DPadDown = 2, DPadLeft = 3, DPadRight = 4,
-          ActionTop = 5, ActionBottom = 6, ActionLeft = 7, ActionRight = 8,
+          Invalid = 0,
+          JumpKey = 1,
+          NormalAttackKey = 2,
+          InteractKey = 3,
+          SprintKey = 12,
+          CharacterSkill1Key = 14,
+          CharacterSkill2Key = 4,
+          CharacterSkill3Key = 5,
+          CharacterSkill4Key = 6,
+          CraftspersonKey1 = 5,
+          CraftspersonKey2 = 6,
+          CraftspersonKey3 = 13,
+          CraftspersonKey4 = 4,
+          CraftspersonKey5 = 3,
+          CraftspersonKey6 = 1,
+          CraftspersonKey7 = 5,
+          CraftspersonKey8 = 8,
+          CraftspersonKey9 = 7,
+          CraftspersonKey10 = 6,
+          CraftspersonKey11 = 12,
+          CraftspersonKey12 = 13,
+          CraftspersonKey13 = 14,
+          CraftspersonKey14 = 9,
+          MenuConfirmKey = 1,
+          MenuBackKey = 2,
+          DPadUp = 5, DPadDown = 6, DPadLeft = 7, DPadRight = 8,
+          ActionTop = 4, ActionBottom = 1, ActionLeft = 3, ActionRight = 2,
           LeftStick = 9, RightStick = 10, LeftBumper = 11, RightBumper = 12,
           SpecialLeft = 13, SpecialRight = 14,
-          LeftTrigger = 15, RightTrigger = 16,
-          LeftStickUp = 17, LeftStickDown = 18, LeftStickLeft = 19, LeftStickRight = 20,
-          RightStickUp = 21, RightStickDown = 22, RightStickLeft = 23, RightStickRight = 24,
-          ButtonSouth = 6, ButtonEast = 8, ButtonWest = 7, ButtonNorth = 5, LeftShoulder = 11, RightShoulder = 12
+          LeftTrigger = 13, RightTrigger = 14,
+          ButtonSouth = 1, ButtonEast = 2, ButtonWest = 3, ButtonNorth = 4, LeftShoulder = 11, RightShoulder = 12
         },
         StageMode = {
           Beyond = 1,
@@ -2331,6 +2694,18 @@ export class MiliastraSimulator {
           if t._resId == rid then return end
           t._resId = rid
           t._raw.resourceId = rid
+          if t._raw.imageColor.a == 0 and not t._raw._explicitImageColor then
+            _FastSetImgCol(t._id, 255, 255, 255, 255)
+          end
+        end,
+        imageId = function(t, v)
+          local rid = tonumber(v) or v or 100001
+          if t._resId == rid then return end
+          t._resId = rid
+          t._raw.resourceId = rid
+          if t._raw.imageColor.a == 0 and not t._raw._explicitImageColor then
+            _FastSetImgCol(t._id, 255, 255, 255, 255)
+          end
         end,
         anchoredPositionX = function(t, v)
           local x = tonumber(v) or 0
@@ -2480,8 +2855,14 @@ export class MiliastraSimulator {
         end,
         playSoundEffect = function(t, v) t._raw.playSoundEffect = not not v end,
         layer = function(t, v) t._raw.layer = tonumber(v) or 0 end,
-        keyboardKeyCode = function(t, v) t._raw.keyboardKeyCode = tonumber(v) or 0 end,
-        controllerKeyCode = function(t, v) t._raw.controllerKeyCode = tonumber(v) or 0 end
+        keyboardKeyCode = function(t, v)
+          t._raw.className = "ClientUIKeyHintControl"
+          t._raw.keyboardKeyCode = tonumber(v) or 0
+        end,
+        controllerKeyCode = function(t, v)
+          t._raw.className = "ClientUIKeyHintControl"
+          t._raw.controllerKeyCode = tonumber(v) or 0
+        end
       }
 
       local _ControlMeta = {
@@ -3079,6 +3460,18 @@ export class MiliastraSimulator {
       -- 6. Global Game Engine Object
       game = {
         GetUICanvasSize = _FastGetCanvasSize,
+        GetCanvasSize = _FastGetCanvasSize,
+        GetScreenResolution = _FastGetCanvasSize,
+        GetWindowResolution = _FastGetCanvasSize,
+        GetUISize = _FastGetCanvasSize,
+        GetScreenWidth = function()
+          local w, _ = _FastGetCanvasSize()
+          return w
+        end,
+        GetScreenHeight = function()
+          local _, h = _FastGetCanvasSize()
+          return h
+        end,
 
         GetCursorUIPos = _FastGetCursorPos,
 
@@ -3122,6 +3515,7 @@ export class MiliastraSimulator {
         end,
 
         PlayAudio2D = function(id)
+          sim:playAudioEffect(id)
           return math.random(1000, 9999)
         end,
 
@@ -3188,8 +3582,14 @@ export class MiliastraSimulator {
             Connect = function(self, fn) end,
             Fire = function(self, ...) end,
             SendSignal = function(self)
-              sim.lastSentSignal = tostring(name)
-              sim:log("[ServerSignal: " .. tostring(name) .. "] Dispatched with " .. tostring(#params) .. " params", "info")
+              local sigName = tostring(name or "")
+              sim.lastSentSignal = sigName
+              sim:log("[ServerSignal: " .. sigName .. "] Dispatched with " .. tostring(#params) .. " params", "info")
+              local upperName = string.upper(sigName)
+              if string.find(upperName, "EXIT", 1, true) or string.find(upperName, "CLOSE", 1, true) or string.find(upperName, "QUIT", 1, true) then
+                sim:log("[Node Graph] Signal '" .. sigName .. "' -> Set UI Control (Group) Status: UI Control Group Status_Off", "info")
+                sim:requestCloseFromLua("ServerSignal('" .. sigName .. "') -> UI Control Group Status_Off")
+              end
             end,
             AddBool = function(self, v) table.insert(params, not not v) end,
             AddBoolList = function(self, list) for _, v in ipairs(list or {}) do table.insert(params, not not v) end end,
@@ -4540,10 +4940,40 @@ end`;
     }
 
     if (imgCol && imgCol.a > 0) {
-      const colorStr = ctrl._imageColorCss || `rgba(${imgCol.r}, ${imgCol.g}, ${imgCol.b}, ${imgCol.a / 255})`;
-      const shape = ASSET_SHAPES[ctrl.resourceId] || 'rectangle';
-      const hasProgressMask = Boolean(ctrl.enableMask && (ctrl.enableFillByProgress || ctrl.invertMask));
-      const hasMaskSoftEdge = Boolean(ctrl.enableMask && ctrl.enableSoftEdge);
+      const stickerEntry = (ctrl.resourceId >= 112001 && ctrl.resourceId <= 112074)
+        ? STICKER_SPRITE_CACHE.get(ctrl.resourceId)
+        : null;
+
+      if (stickerEntry) {
+        const prevAlpha = ctx.globalAlpha;
+        ctx.globalAlpha = prevAlpha * (imgCol.a / 255);
+        ctx.drawImage(
+          stickerEntry.canvas,
+          bounds.left,
+          canvasY,
+          Math.max(1, bounds.width),
+          Math.max(1, bounds.height)
+        );
+        // If tinted for hit-flash (e.g. bright white/yellow flash or red damage flash), overlay flash silhouette
+        if (
+          (imgCol.r >= 245 && imgCol.g >= 245 && imgCol.b >= 210 && imgCol.b < 250) ||
+          (imgCol.r >= 240 && imgCol.g < 160 && imgCol.b < 160)
+        ) {
+          ctx.globalAlpha = prevAlpha * 0.68;
+          ctx.drawImage(
+            stickerEntry.flashCanvas,
+            bounds.left,
+            canvasY,
+            Math.max(1, bounds.width),
+            Math.max(1, bounds.height)
+          );
+        }
+        ctx.globalAlpha = prevAlpha;
+      } else {
+        const colorStr = ctrl._imageColorCss || `rgba(${imgCol.r}, ${imgCol.g}, ${imgCol.b}, ${imgCol.a / 255})`;
+        const shape = ASSET_SHAPES[ctrl.resourceId] || 'rectangle';
+        const hasProgressMask = Boolean(ctrl.enableMask && (ctrl.enableFillByProgress || ctrl.invertMask));
+        const hasMaskSoftEdge = Boolean(ctrl.enableMask && ctrl.enableSoftEdge);
 
       // Fast path for standard rectangles (avoids ctx.save/restore overhead across hundreds of grid cells)
       if (!hasProgressMask && !hasMaskSoftEdge && shape === 'rectangle' && (!ctrl.enableSoftEdge || (ctrl.softEdgeWidthX <= 0 && ctrl.softEdgeWidthY <= 0))) {
@@ -4726,6 +5156,7 @@ end`;
           ctx.fillRect(bounds.left, canvasY, Math.max(1, bounds.width), Math.max(1, bounds.height));
         }
         ctx.restore();
+      }
       }
     }
 

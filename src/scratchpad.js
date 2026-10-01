@@ -9,9 +9,9 @@
 // ============================================================================
 
 import { copyToClipboard, showToast } from './ui-components.js';
-import { highlightLua } from './syntax-highlighter.js';
 import { openLuaRunnerModal } from './lua-runner-modal.js';
 import { getLuaCompletionsAtCursor, renderAutocompleteListHTML } from './lua-autocomplete.js';
+import { VSCodeDocumentModel, EDITOR_LINE_HEIGHT, EDITOR_PADDING_TOP, EDITOR_PADDING_LEFT } from './vscode-editor-engine.js';
 
 // In-memory cache for fetched scratchpad .lua files
 const scratchpadCache = new Map();
@@ -290,11 +290,13 @@ export function renderScratchpad(container, initialCode = '') {
       <!-- CODE EDITOR + ATTACHED FOOTER -->
       <div class="editor-frame-shell">
         <div class="editor-wrapper">
-          <div class="editor-gutter" id="editor-gutter"></div>
+          <div class="editor-gutter" id="editor-gutter"><div id="editor-gutter-inner"></div></div>
           <div class="editor-code-container" id="editor-code-container">
-            <!-- Native Find Match Highlight Backdrop -->
-            <pre class="editor-find-layer" id="editor-find-layer" aria-hidden="true"></pre>
-            <!-- Lua Syntax Highlight Layer -->
+            <!-- VSCode Active Line Highlight Band -->
+            <div class="editor-active-line-band" id="editor-active-line-band" aria-hidden="true"></div>
+            <!-- Native Find Match Highlight Backdrop (Viewport-Clipped) -->
+            <pre class="editor-find-layer" id="editor-find-layer" aria-hidden="true"><code id="editor-find-output"></code></pre>
+            <!-- Lua Syntax Highlight Layer (Viewport-Virtualized) -->
             <pre class="editor-highlight-layer" id="editor-highlight-layer" aria-hidden="true"><code id="editor-code-output"></code></pre>
             <!-- Interactive Textarea -->
             <textarea id="scratchpad-textarea" class="editor-interactive-textarea" spellcheck="false" autocomplete="off" autocorrect="off" autocapitalize="off">${escapeHtmlPlain(defaultCode)}</textarea>
@@ -318,9 +320,11 @@ export function renderScratchpad(container, initialCode = '') {
         <div class="editor-status-footer">
           <div class="editor-footer-left">
             <span class="editor-footer-tag">STATUS & METRICS</span>
-            <span class="editor-footer-hint">Miliastra Lua 5.1 Runtime • <code>lua_scratchpad/</code> & Browser Cache • [Ctrl+F / F3] Find • [Ctrl+Space] Suggestions</span>
+            <span class="editor-footer-hint">C++/WASM Linear-Memory Indexer + VSCode Virtualized DOM • [Ctrl+F / F3] Find • [Ctrl+Space] Suggestions</span>
           </div>
           <div class="editor-footer-right">
+            <span id="scratchpad-perf-badge" style="color: var(--accent-gold); font-weight: 700;">⚡ WASM</span>
+            <span class="editor-footer-sep">|</span>
             <span id="scratchpad-cursor-pos">Ln 1, Col 1</span>
             <span class="editor-footer-sep">|</span>
             <span id="scratchpad-metrics">Lines: 0 | Characters: 0</span>
@@ -332,12 +336,13 @@ export function renderScratchpad(container, initialCode = '') {
 
   const textarea = container.querySelector('#scratchpad-textarea');
   const codeOutput = container.querySelector('#editor-code-output');
-  const highlightLayer = container.querySelector('#editor-highlight-layer');
-  const findLayer = container.querySelector('#editor-find-layer');
+  const findOutput = container.querySelector('#editor-find-output');
+  const activeLineBand = container.querySelector('#editor-active-line-band');
   const codeContainer = container.querySelector('#editor-code-container');
-  const gutter = container.querySelector('#editor-gutter');
+  const gutterInner = container.querySelector('#editor-gutter-inner');
   const metrics = container.querySelector('#scratchpad-metrics');
   const cursorPosEl = container.querySelector('#scratchpad-cursor-pos');
+  const perfBadgeEl = container.querySelector('#scratchpad-perf-badge');
   const select = container.querySelector('#snippet-select');
   const sourceFileEl = container.querySelector('#scratchpad-source-file');
   const simBtn = container.querySelector('#scratchpad-sim-btn');
@@ -351,22 +356,48 @@ export function renderScratchpad(container, initialCode = '') {
   const downloadBtn = container.querySelector('#scratchpad-download-btn');
   const findToggleBtn = container.querySelector('#scratchpad-find-toggle-btn');
 
-  const persistCurrentBufferToCache = () => {
+  // Initialize VSCode + WASM Document Model
+  const docModel = new VSCodeDocumentModel(defaultCode);
+
+  // Debounced Persistence to localStorage (eliminates synchronous JSON.stringify stalls on keystroke)
+  let persistTimerId = null;
+
+  const flushPersistCurrentBufferToCache = () => {
+    if (persistTimerId !== null) {
+      clearTimeout(persistTimerId);
+      persistTimerId = null;
+    }
     const val = select.value;
     if (val === '') return;
     const idx = parseInt(val, 10);
     const activeSnip = SNIPPETS[idx];
     if (!activeSnip) return;
 
-    activeSnip.code = textarea.value;
+    activeSnip.code = docModel.text;
     activeSnip._loaded = true;
     if (activeSnip.isUserDoc) {
       activeSnip.updatedAt = Date.now();
       saveUserDocsToStorage();
     } else if (activeSnip.id) {
       activeSnip._hasUserOverride = true;
-      saveBuiltinEditToStorage(activeSnip.id, textarea.value);
+      saveBuiltinEditToStorage(activeSnip.id, docModel.text);
     }
+  };
+
+  const persistCurrentBufferToCache = () => {
+    const val = select.value;
+    if (val !== '') {
+      const idx = parseInt(val, 10);
+      const activeSnip = SNIPPETS[idx];
+      if (activeSnip) {
+        activeSnip.code = docModel.text;
+        activeSnip._loaded = true;
+      }
+    }
+    if (persistTimerId !== null) {
+      clearTimeout(persistTimerId);
+    }
+    persistTimerId = setTimeout(flushPersistCurrentBufferToCache, 320);
   };
 
   // Native Find Widget elements
@@ -382,119 +413,185 @@ export function renderScratchpad(container, initialCode = '') {
 
   let userEdited = Boolean(initialCode);
 
-  // Find state
+  // Find state (backed by WASM linear memory match buffer)
   let isFindOpen = false;
-  let findMatches = []; // Array of { start, end }
+  let findMatchCount = 0;
+  let findMatchPairView = null;
   let activeFindIndex = -1;
 
   // Autocomplete state
   let completionState = null; // { replaceStart, replaceEnd, prefix, items }
   let acSelectedIndex = 0;
 
-  // Compute cursor Ln / Col
+  // Virtualized Viewport State
+  let renderedStartLine = -1;
+  let renderedEndLine = -1;
+  let renderedVersionId = -1;
+  let activeCursorLine = 0;
+
+  // Compute cursor Ln / Col in O(log N) via WASM binary search
   const updateCursorStatus = () => {
     const pos = textarea.selectionStart || 0;
-    const before = textarea.value.slice(0, pos);
-    const linesBefore = before.split('\n');
-    const ln = linesBefore.length;
-    const col = linesBefore[linesBefore.length - 1].length + 1;
+    const loc = docModel.getCursorLocation(pos);
+    activeCursorLine = loc.line;
+
     if (cursorPosEl) {
-      cursorPosEl.textContent = `Ln ${ln}, Col ${col}`;
+      cursorPosEl.textContent = `Ln ${loc.ln1}, Col ${loc.col1}`;
     }
-    return { ln, col, lineText: linesBefore[linesBefore.length - 1] };
+
+    // Position VSCode Active Line Highlight Band in O(1)
+    if (activeLineBand) {
+      const scrollTop = textarea.scrollTop;
+      const bandOffsetY = activeCursorLine * EDITOR_LINE_HEIGHT - scrollTop;
+      activeLineBand.style.transform = `translate3d(0px, ${bandOffsetY}px, 0)`;
+    }
+
+    // Toggle active line class inside virtualized gutter in O(visible lines)
+    if (gutterInner && renderedStartLine >= 0) {
+      const prevActive = gutterInner.querySelector('.gutter-line.active');
+      if (prevActive) prevActive.classList.remove('active');
+      const relIdx = activeCursorLine - renderedStartLine;
+      const children = gutterInner.children;
+      if (relIdx >= 0 && relIdx < children.length) {
+        children[relIdx].classList.add('active');
+      }
+    }
+
+    return loc;
   };
 
-  // Render Find Match Highlight Layer
+  // Render Viewport-Clipped Find Highlights for [startLine .. endLine]
+  const renderViewportFindSlice = (startLine, endLine) => {
+    if (!isFindOpen || findMatchCount === 0 || !findMatchPairView) {
+      if (findOutput.innerHTML !== '') findOutput.innerHTML = '';
+      return;
+    }
+    findOutput.innerHTML = docModel.renderViewportFindLayerHTML(
+      startLine,
+      endLine,
+      findMatchPairView,
+      findMatchCount,
+      activeFindIndex
+    );
+  };
+
+  // Run WASM linear-memory search when query or document changes
   const renderFindHighlights = () => {
     const query = isFindOpen ? findInput.value : '';
     if (!isFindOpen || !query) {
-      findMatches = [];
+      findMatchCount = 0;
+      findMatchPairView = null;
       activeFindIndex = -1;
-      findLayer.innerHTML = '';
+      findOutput.innerHTML = '';
       findCountEl.textContent = '0/0';
       return;
     }
 
-    const text = textarea.value;
-    const lowerText = text.toLowerCase();
-    const lowerQuery = query.toLowerCase();
-    const qLen = query.length;
+    const res = docModel.findMatchesInWasm(query);
+    findMatchCount = res.count;
+    findMatchPairView = res.pairView;
 
-    const matches = [];
-    let searchFrom = 0;
-    while (searchFrom <= lowerText.length - qLen) {
-      const idx = lowerText.indexOf(lowerQuery, searchFrom);
-      if (idx === -1) break;
-      matches.push({ start: idx, end: idx + qLen });
-      searchFrom = idx + Math.max(1, qLen);
-    }
-
-    findMatches = matches;
-    if (matches.length === 0) {
+    if (findMatchCount === 0) {
       activeFindIndex = -1;
       findCountEl.textContent = '0/0';
-      findLayer.innerHTML = '';
+      findOutput.innerHTML = '';
       return;
     }
 
-    if (activeFindIndex < 0 || activeFindIndex >= matches.length) {
+    if (activeFindIndex < 0 || activeFindIndex >= findMatchCount) {
       activeFindIndex = 0;
     }
 
-    findCountEl.textContent = `${activeFindIndex + 1}/${matches.length}`;
+    findCountEl.textContent = `${activeFindIndex + 1}/${findMatchCount}`;
+    renderViewportFindSlice(renderedStartLine, renderedEndLine);
+  };
 
-    // Build backdrop HTML with <mark> around matched slices
-    let html = '';
-    let cursor = 0;
-    for (let i = 0; i < matches.length; i++) {
-      const m = matches[i];
-      if (m.start > cursor) {
-        html += escapeHtmlPlain(text.slice(cursor, m.start));
+  // VSCode Viewport Virtualization Engine:
+  // Only renders the ~45 visible lines inside the viewport window + overscan!
+  const renderViewport = (forceRebuild = false) => {
+    const scrollTop = textarea.scrollTop;
+    const scrollLeft = textarea.scrollLeft;
+    const viewportH = textarea.clientHeight || 560;
+    const totalLines = docModel.lines.length;
+
+    const firstVis = Math.max(0, Math.floor(scrollTop / EDITOR_LINE_HEIGHT));
+    const visCount = Math.ceil(viewportH / EDITOR_LINE_HEIGHT) + 1;
+    const overscan = 14;
+
+    const startLine = Math.max(0, firstVis - overscan);
+    const endLine = Math.min(totalLines - 1, firstVis + visCount + overscan);
+
+    const needsDOMUpdate =
+      forceRebuild ||
+      startLine !== renderedStartLine ||
+      endLine !== renderedEndLine ||
+      docModel.versionId !== renderedVersionId;
+
+    if (needsDOMUpdate) {
+      renderedStartLine = startLine;
+      renderedEndLine = endLine;
+      renderedVersionId = docModel.versionId;
+
+      const htmlRows = [];
+      let gutterHtml = '';
+
+      for (let i = startLine; i <= endLine; i++) {
+        htmlRows.push(docModel.getHighlightedLineHTML(i));
+        const activeCls = i === activeCursorLine ? ' active' : '';
+        gutterHtml += `<div class="gutter-line${activeCls}">${i + 1}</div>`;
       }
-      const cls = i === activeFindIndex ? 'sp-find-mark active' : 'sp-find-mark';
-      html += `<mark class="${cls}">${escapeHtmlPlain(text.slice(m.start, m.end))}</mark>`;
-      cursor = m.end;
+
+      codeOutput.innerHTML = htmlRows.join('\n');
+      gutterInner.innerHTML = gutterHtml;
+
+      if (isFindOpen) {
+        renderViewportFindSlice(startLine, endLine);
+      }
     }
-    if (cursor < text.length) {
-      html += escapeHtmlPlain(text.slice(cursor));
+
+    // GPU-composited transform positioning for the virtualized window slice
+    const offsetY = startLine * EDITOR_LINE_HEIGHT - scrollTop;
+    const codeTransform = `translate3d(${-scrollLeft}px, ${offsetY}px, 0)`;
+    codeOutput.style.transform = codeTransform;
+    findOutput.style.transform = codeTransform;
+    gutterInner.style.transform = `translate3d(0px, ${offsetY}px, 0)`;
+
+    if (activeLineBand) {
+      const bandOffsetY = activeCursorLine * EDITOR_LINE_HEIGHT - scrollTop;
+      activeLineBand.style.transform = `translate3d(0px, ${bandOffsetY}px, 0)`;
     }
-    if (text.endsWith('\n')) {
-      html += ' ';
-    }
-    findLayer.innerHTML = html;
   };
 
   const scrollToActiveFindMatch = () => {
-    if (activeFindIndex < 0 || activeFindIndex >= findMatches.length) return;
-    const match = findMatches[activeFindIndex];
-    const before = textarea.value.slice(0, match.start);
-    const lineIndex = before.split('\n').length - 1;
-    const targetScrollTop = Math.max(0, lineIndex * 20 - textarea.clientHeight * 0.35);
+    if (activeFindIndex < 0 || activeFindIndex >= findMatchCount || !findMatchPairView) return;
+    const matchStart = findMatchPairView[activeFindIndex * 2];
+    const loc = docModel.wasm.offsetToLineCol(matchStart);
+    const targetScrollTop = Math.max(0, loc.line * EDITOR_LINE_HEIGHT - textarea.clientHeight * 0.35);
     textarea.scrollTop = targetScrollTop;
     syncScroll();
   };
 
   const stepFindMatch = (delta) => {
-    if (findMatches.length === 0) return;
-    activeFindIndex = (activeFindIndex + delta + findMatches.length) % findMatches.length;
-    renderFindHighlights();
+    if (findMatchCount === 0) return;
+    activeFindIndex = (activeFindIndex + delta + findMatchCount) % findMatchCount;
+    findCountEl.textContent = `${activeFindIndex + 1}/${findMatchCount}`;
     scrollToActiveFindMatch();
+    renderViewportFindSlice(renderedStartLine, renderedEndLine);
   };
 
   const openFindBar = () => {
     isFindOpen = true;
     findBar.style.display = 'flex';
-    // Pre-fill with selected text if short single-line selection
     const selStart = textarea.selectionStart;
     const selEnd = textarea.selectionEnd;
     if (selEnd > selStart && selEnd - selStart < 64) {
-      const selectedText = textarea.value.slice(selStart, selEnd);
+      const selectedText = docModel.text.slice(selStart, selEnd);
       if (!selectedText.includes('\n')) {
         findInput.value = selectedText;
       }
     }
     renderFindHighlights();
-    if (findMatches.length > 0) {
+    if (findMatchCount > 0) {
       scrollToActiveFindMatch();
     }
     findInput.focus();
@@ -504,7 +601,7 @@ export function renderScratchpad(container, initialCode = '') {
   const closeFindBar = () => {
     isFindOpen = false;
     findBar.style.display = 'none';
-    findLayer.innerHTML = '';
+    findOutput.innerHTML = '';
     textarea.focus();
   };
 
@@ -525,19 +622,18 @@ export function renderScratchpad(container, initialCode = '') {
     acPopup.innerHTML = renderAutocompleteListHTML(completionState, acSelectedIndex);
     acPopup.style.display = 'block';
 
-    // Compute caret pixel coordinates inside .editor-code-container
+    // Compute caret pixel coordinates in O(log N) via WASM line index
     const pos = textarea.selectionStart || 0;
-    const before = textarea.value.slice(0, pos);
-    const lines = before.split('\n');
-    const lineIdx = lines.length - 1;
-    const colIdx = lines[lineIdx].length;
+    const loc = docModel.getCursorLocation(pos);
+    const lineIdx = loc.line;
+    const colIdx = loc.col;
 
     const charWidth = 7.82; // 13px JetBrains Mono character width
-    const lineHeight = 20;
-    const padding = 12;
+    const lineHeight = EDITOR_LINE_HEIGHT;
+    const padding = EDITOR_PADDING_TOP;
 
     const rawTop = padding + (lineIdx + 1) * lineHeight - textarea.scrollTop + 2;
-    const rawLeft = padding + colIdx * charWidth - textarea.scrollLeft;
+    const rawLeft = EDITOR_PADDING_LEFT + colIdx * charWidth - textarea.scrollLeft;
 
     const containerW = codeContainer.clientWidth || 600;
     const containerH = codeContainer.clientHeight || 400;
@@ -545,7 +641,6 @@ export function renderScratchpad(container, initialCode = '') {
     const popupH = Math.min(240, acPopup.scrollHeight || 200);
 
     const clampedLeft = Math.max(8, Math.min(rawLeft, containerW - popupW - 12));
-    // Flip above line if near bottom of viewport
     const clampedTop = (rawTop + popupH > containerH - 8)
       ? Math.max(8, rawTop - lineHeight - popupH - 4)
       : Math.max(8, rawTop);
@@ -553,7 +648,6 @@ export function renderScratchpad(container, initialCode = '') {
     acPopup.style.left = `${Math.round(clampedLeft)}px`;
     acPopup.style.top = `${Math.round(clampedTop)}px`;
 
-    // Ensure selected item is visible inside the popup scroll
     const activeRow = acPopup.querySelector('.ac-item-row.active');
     if (activeRow) {
       activeRow.scrollIntoView({ block: 'nearest' });
@@ -565,7 +659,12 @@ export function renderScratchpad(container, initialCode = '') {
       closeAutocomplete();
       return;
     }
-    const nextState = getLuaCompletionsAtCursor(textarea.value, textarea.selectionStart);
+    const pos = textarea.selectionStart || 0;
+    const loc = docModel.getCursorLocation(pos);
+    const nextState = getLuaCompletionsAtCursor(docModel.text, pos, {
+      currentLineBeforeCursor: loc.lineBeforeCursor,
+      precomputedWordItems: docModel.getCachedWordCompletionItems()
+    });
     if (!nextState) {
       closeAutocomplete();
       return;
@@ -579,18 +678,18 @@ export function renderScratchpad(container, initialCode = '') {
     if (!completionState || !completionState.items[indexToAccept]) return false;
     const chosen = completionState.items[indexToAccept];
     const { replaceStart, replaceEnd } = completionState;
-    const val = textarea.value;
+    const val = docModel.text;
     const insertStr = chosen.insertText || chosen.name;
 
-    textarea.value = val.slice(0, replaceStart) + insertStr + val.slice(replaceEnd);
+    const nextText = val.slice(0, replaceStart) + insertStr + val.slice(replaceEnd);
     const nextCaret = replaceStart + insertStr.length;
+    textarea.value = nextText;
     textarea.selectionStart = textarea.selectionEnd = nextCaret;
 
     userEdited = true;
     closeAutocomplete();
-    updateEditor();
+    updateEditor(false, nextCaret);
     persistCurrentBufferToCache();
-    syncScroll();
     textarea.focus();
     return true;
   };
@@ -605,38 +704,35 @@ export function renderScratchpad(container, initialCode = '') {
     }
   });
 
-  const updateEditor = () => {
+  // Incremental or Full Editor Update
+  const updateEditor = (forceFullReset = false, cursorHint = textarea.selectionStart) => {
+    const t0 = performance.now();
     const val = textarea.value;
-    const lines = val.split('\n');
-    const lineCount = lines.length;
 
-    // Update gutter line numbers
-    let gutterHtml = '';
-    for (let i = 1; i <= lineCount; i++) {
-      gutterHtml += `<div class="gutter-line">${i}</div>`;
+    if (forceFullReset) {
+      docModel.setFullText(val);
+    } else {
+      docModel.applyEdit(val, cursorHint);
     }
-    gutter.innerHTML = gutterHtml;
 
-    // Update syntax highlighting layer
-    const codeToHighlight = val.endsWith('\n') ? val + ' ' : val;
-    codeOutput.innerHTML = highlightLua(codeToHighlight, false);
+    const lineCount = docModel.lines.length;
+    updateCursorStatus();
+    renderViewport(forceFullReset);
 
-    // Update find highlights if find bar is open
     if (isFindOpen) {
       renderFindHighlights();
     }
 
-    // Update metrics & cursor position
     metrics.textContent = `Lines: ${lineCount} | Characters: ${val.length}`;
-    updateCursorStatus();
+
+    if (perfBadgeEl) {
+      const elapsed = performance.now() - t0;
+      perfBadgeEl.textContent = `⚡ WASM ${elapsed.toFixed(2)}ms`;
+    }
   };
 
   const syncScroll = () => {
-    highlightLayer.scrollTop = textarea.scrollTop;
-    highlightLayer.scrollLeft = textarea.scrollLeft;
-    findLayer.scrollTop = textarea.scrollTop;
-    findLayer.scrollLeft = textarea.scrollLeft;
-    gutter.scrollTop = textarea.scrollTop;
+    renderViewport(false);
     if (completionState) {
       positionAndRenderAutocomplete();
     }
@@ -644,21 +740,22 @@ export function renderScratchpad(container, initialCode = '') {
 
   textarea.addEventListener('input', () => {
     userEdited = true;
-    updateEditor();
+    updateEditor(false, textarea.selectionStart);
     persistCurrentBufferToCache();
-    syncScroll();
     triggerAutocompleteCheck();
   });
 
-  textarea.addEventListener('scroll', syncScroll);
+  textarea.addEventListener('scroll', syncScroll, { passive: true });
   textarea.addEventListener('click', () => {
     updateCursorStatus();
     closeAutocomplete();
   });
   textarea.addEventListener('keyup', (e) => {
-    if (['ArrowLeft', 'ArrowRight', 'Home', 'End', 'PageUp', 'PageDown'].includes(e.key)) {
+    if (['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End', 'PageUp', 'PageDown'].includes(e.key)) {
       updateCursorStatus();
-      closeAutocomplete();
+      if (['ArrowLeft', 'ArrowRight', 'Home', 'End', 'PageUp', 'PageDown'].includes(e.key)) {
+        closeAutocomplete();
+      }
     }
   });
 
@@ -711,30 +808,29 @@ export function renderScratchpad(container, initialCode = '') {
       return;
     }
 
-    // 5. Standard Tab key & Shift+Tab indentation
+    // 5. Standard Tab key & Shift+Tab indentation (O(log N) line lookup via WASM)
     if (e.key === 'Tab') {
       e.preventDefault();
       userEdited = true;
       const start = textarea.selectionStart;
       const end = textarea.selectionEnd;
+      const curText = docModel.text;
 
       if (!e.shiftKey) {
-        textarea.value = textarea.value.substring(0, start) + '    ' + textarea.value.substring(end);
+        textarea.value = curText.substring(0, start) + '    ' + curText.substring(end);
         textarea.selectionStart = textarea.selectionEnd = start + 4;
       } else {
-        const before = textarea.value.substring(0, start);
-        const lastNewline = before.lastIndexOf('\n');
-        const lineStart = lastNewline === -1 ? 0 : lastNewline + 1;
-        const linePrefix = textarea.value.substring(lineStart, lineStart + 4);
+        const loc = docModel.wasm.offsetToLineCol(start);
+        const lineStart = loc.lineStartOffset;
+        const linePrefix = curText.substring(lineStart, lineStart + 4);
         if (linePrefix === '    ') {
-          textarea.value = textarea.value.substring(0, lineStart) + textarea.value.substring(lineStart + 4);
+          textarea.value = curText.substring(0, lineStart) + curText.substring(lineStart + 4);
           textarea.selectionStart = Math.max(lineStart, start - 4);
           textarea.selectionEnd = Math.max(lineStart, end - 4);
         }
       }
-      updateEditor();
+      updateEditor(false, textarea.selectionStart);
       persistCurrentBufferToCache();
-      syncScroll();
     }
   });
 
@@ -750,7 +846,7 @@ export function renderScratchpad(container, initialCode = '') {
   findInput.addEventListener('input', () => {
     activeFindIndex = 0;
     renderFindHighlights();
-    if (findMatches.length > 0) {
+    if (findMatchCount > 0) {
       scrollToActiveFindMatch();
     }
   });
@@ -775,7 +871,6 @@ export function renderScratchpad(container, initialCode = '') {
   }
   activeScratchpadKeydownHandler = (e) => {
     if (!document.body.contains(textarea)) return;
-    // Do not hijack if simulator modal is open on top
     if (document.querySelector('.sim-modal-overlay.active')) return;
 
     const isCtrlF = (e.ctrlKey || e.metaKey) && e.key && e.key.toLowerCase() === 'f';
@@ -797,8 +892,8 @@ export function renderScratchpad(container, initialCode = '') {
   };
   window.addEventListener('keydown', activeScratchpadKeydownHandler, true);
 
-  // Initial update
-  updateEditor();
+  // Initial full render
+  updateEditor(true);
 
   // Populate default snippet once static fetch finishes
   if (!initialCode && defaultSnippet && !defaultSnippet._loaded) {
@@ -807,13 +902,13 @@ export function renderScratchpad(container, initialCode = '') {
         defaultSnippet.code = fetched;
         defaultSnippet._loaded = true;
         textarea.value = fetched;
-        updateEditor();
-        syncScroll();
+        updateEditor(true);
       }
     });
   }
 
   select.addEventListener('change', async () => {
+    flushPersistCurrentBufferToCache();
     const val = select.value;
     if (val !== '') {
       const idx = parseInt(val, 10);
@@ -840,9 +935,9 @@ export function renderScratchpad(container, initialCode = '') {
       textarea.value = selectedSnippet.code;
       userEdited = false;
       closeAutocomplete();
-      updateEditor();
       textarea.scrollTop = 0;
-      syncScroll();
+      textarea.scrollLeft = 0;
+      updateEditor(true);
       showToast(`Loaded: ${selectedSnippet.name}`);
     } else if (deleteDocBtn) {
       deleteDocBtn.style.display = 'none';
@@ -912,9 +1007,9 @@ export function renderScratchpad(container, initialCode = '') {
     textarea.value = newDoc.code;
     userEdited = true;
     closeAutocomplete();
-    updateEditor();
     textarea.scrollTop = 0;
-    syncScroll();
+    textarea.scrollLeft = 0;
+    updateEditor(true);
     textarea.focus();
     showToast(`Created & saved "${cleanTitle}" in browser cache`);
   };
@@ -971,17 +1066,30 @@ export function renderScratchpad(container, initialCode = '') {
         deleteDocBtn.style.display = 'none';
       }
       closeAutocomplete();
-      updateEditor();
-      syncScroll();
+      textarea.scrollTop = 0;
+      textarea.scrollLeft = 0;
+      updateEditor(true);
       showToast(`Removed "${removedName}" from browser cache`);
     });
   }
 
+  if (typeof ResizeObserver !== 'undefined') {
+    const ro = new ResizeObserver(() => {
+      if (document.body.contains(textarea)) {
+        renderViewport(false);
+      } else {
+        ro.disconnect();
+      }
+    });
+    ro.observe(textarea);
+  }
+
   simBtn.addEventListener('click', () => {
+    flushPersistCurrentBufferToCache();
     const selectedIdx = select.value !== '' ? parseInt(select.value, 10) : 0;
     const currentSnippet = SNIPPETS[selectedIdx];
     const titleLabel = currentSnippet ? currentSnippet.name : 'Scratchpad Script';
-    openLuaRunnerModal(textarea.value, titleLabel, () => textarea.value);
+    openLuaRunnerModal(docModel.text, titleLabel, () => docModel.text);
   });
 
   copyBtn.addEventListener('click', () => {

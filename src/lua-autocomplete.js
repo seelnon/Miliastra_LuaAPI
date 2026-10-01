@@ -211,8 +211,40 @@ function buildCompletionCatalog() {
 
 const CATALOG = buildCompletionCatalog();
 
-// Extract unique identifier words from the active Lua document
-function extractDocumentWords(code, currentPrefix) {
+// Extract unique identifier words from a single line or document
+export function extractWordsFromLine(line, outSet) {
+  if (!line) return;
+  const len = line.length;
+  let i = 0;
+  while (i < len) {
+    const c = line.charCodeAt(i);
+    // Stop scanning if single-line comment starts
+    if (c === 45 && i + 1 < len && line.charCodeAt(i + 1) === 45) break;
+    if ((c >= 65 && c <= 90) || (c >= 97 && c <= 122) || c === 95) {
+      let j = i + 1;
+      while (j < len) {
+        const nc = line.charCodeAt(j);
+        if ((nc >= 65 && nc <= 90) || (nc >= 97 && nc <= 122) || (nc >= 48 && nc <= 57) || nc === 95) {
+          j++;
+        } else {
+          break;
+        }
+      }
+      if (j - i >= 3) {
+        outSet.add(line.slice(i, j));
+      }
+      i = j;
+    } else {
+      i++;
+    }
+  }
+}
+
+function extractDocumentWords(code, currentPrefix, precomputedWordItems = null) {
+  if (precomputedWordItems) {
+    if (!currentPrefix) return precomputedWordItems;
+    return precomputedWordItems.filter(item => item.name !== currentPrefix);
+  }
   const wordSet = new Set();
   const regex = /\b([A-Za-z_][A-Za-z0-9_]{2,})\b/g;
   let match;
@@ -279,11 +311,20 @@ function highlightMatchLabel(displayLabel, prefix) {
 
 /**
  * Queries context-aware completion suggestions at the cursor offset in `code`.
+ * When `fastContext` ({ currentLineBeforeCursor, precomputedWordItems }) is passed
+ * from the VSCode incremental editor model, runs in O(1) without touching the full document!
  */
-export function getLuaCompletionsAtCursor(code, cursorOffset) {
-  const beforeCursor = code.slice(0, cursorOffset);
-  const lastNewline = beforeCursor.lastIndexOf('\n');
-  const currentLineBeforeCursor = beforeCursor.slice(lastNewline + 1);
+export function getLuaCompletionsAtCursor(code, cursorOffset, fastContext = null) {
+  let currentLineBeforeCursor;
+  const precomputedWordItems = fastContext ? fastContext.precomputedWordItems : null;
+
+  if (fastContext && typeof fastContext.currentLineBeforeCursor === 'string') {
+    currentLineBeforeCursor = fastContext.currentLineBeforeCursor;
+  } else {
+    const beforeCursor = code.slice(0, cursorOffset);
+    const lastNewline = beforeCursor.lastIndexOf('\n');
+    currentLineBeforeCursor = beforeCursor.slice(lastNewline + 1);
+  }
 
   // Do not trigger inside a line comment
   if (/^\s*--/.test(currentLineBeforeCursor)) {
@@ -324,7 +365,7 @@ export function getLuaCompletionsAtCursor(code, cursorOffset) {
       candidates = CATALOG.enumNamespaces;
     } else if (sep === ':') {
       // Method call on any control / tween / sequence + document words (matches [img-3]!)
-      const docWords = extractDocumentWords(code, prefix);
+      const docWords = extractDocumentWords(code, prefix, precomputedWordItems);
       candidates = [...docWords, ...CATALOG.allMethodWords, ...CATALOG.controlMethodsColon];
     } else {
       // Property/method access on a control (e.g., script.object., image., button., parent.)
@@ -345,7 +386,7 @@ export function getLuaCompletionsAtCursor(code, cursorOffset) {
   const wordMatch = currentLineBeforeCursor.match(/\b([A-Za-z_][A-Za-z0-9_]*)$/);
   if (wordMatch && wordMatch[1].length >= 2) {
     const prefix = wordMatch[1];
-    const docWords = extractDocumentWords(code, prefix);
+    const docWords = extractDocumentWords(code, prefix, precomputedWordItems);
     const combined = [
       ...docWords,
       ...CATALOG.globalKeywordsAndBuiltins,

@@ -49,10 +49,23 @@ export function openLuaRunnerModal(luaCode, scriptTitle = 'Miliastra Lua Simulat
   let currentCode = luaCode;
   let simWidth = 960;
   let simHeight = 640;
+  let activePresetId = '960x640';
+
+  if (typeof luaCode === 'string') {
+    if (luaCode.includes('1280') && luaCode.includes('720')) {
+      simWidth = 1280;
+      simHeight = 720;
+      activePresetId = '1280x720';
+    } else if (luaCode.includes('1920') && luaCode.includes('1080')) {
+      simWidth = 1920;
+      simHeight = 1080;
+      activePresetId = '1920x1080';
+    }
+  }
+
   let isMaximized = false;
   let isScaleFit = true;
   let isConsoleCollapsed = false;
-  let activePresetId = '960x640';
   let isToolbarOpen = false;
 
   // Retrieve undocked persistence state
@@ -223,9 +236,10 @@ export function openLuaRunnerModal(luaCode, scriptTitle = 'Miliastra Lua Simulat
     }
   };
 
-  const applyResolution = (w, h, presetId = null) => {
+  const applyResolution = (w, h, presetId = null, restartScript = true) => {
     const clampedW = Math.max(200, Math.min(3840, Math.round(Number(w) || 960)));
     const clampedH = Math.max(200, Math.min(2160, Math.round(Number(h) || 640)));
+    const changed = simWidth !== clampedW || simHeight !== clampedH;
     simWidth = clampedW;
     simHeight = clampedH;
 
@@ -238,7 +252,10 @@ export function openLuaRunnerModal(luaCode, scriptTitle = 'Miliastra Lua Simulat
       if (resSelect) resSelect.value = activePresetId;
     }
 
-    if (activeSimulator) {
+    if (changed && restartScript && activeSimulator) {
+      startSimulation(fetchLiveCode());
+      appendLog(`Simulation restarted at ${simWidth} × ${simHeight}`, 'info');
+    } else if (activeSimulator) {
       activeSimulator.setResolution(simWidth, simHeight);
     } else {
       canvas.width = simWidth;

@@ -222,7 +222,7 @@ export const API_CLASSES = [
         signature: "control:SetActive(active)",
         params: [{ name: "active", type: "boolean", desc: "Whether to set as active." }],
         returns: "void",
-        desc: "Sets the active status. Lifecycle functions OnEnable (true) and OnDisable (false) are called."
+        desc: "Sets the active status of a Client Control (calling OnEnable when true and OnDisable when false). WARNING: Only use SetActive(false) on CHILD controls! Never call root:SetActive(false) or root:SetVisible(false) on the root UI Control (Group) to exit an experience—Genshin's 'Set UI Control (Group) Status' Node Graph node cannot override Lua's active/visible state and will be unable to make the UI visible again. To close a root UI Group, send a game.ServerSignal(name):SendSignal() and let the Server Node Graph set 'UI Control Group Status_Off'."
       },
       {
         name: "SetAnchorMax",
@@ -336,7 +336,7 @@ export const API_CLASSES = [
         signature: "control:SetVisible(visible)",
         params: [{ name: "visible", type: "boolean", desc: "Whether to set as visible." }],
         returns: "void",
-        desc: "Sets the visibility status of the Client Control.",
+        desc: "Sets the visibility status of a Client Control. WARNING: Only use SetVisible(false) on CHILD controls! Never call root:SetVisible(false) or root:SetActive(false) on the root UI Control (Group) to close an experience—Genshin's 'Set UI Control (Group) Status' Node Graph node cannot override Lua's active/visible state and will be unable to make the UI visible again.",
         example: `goomba.control:SetVisible(false)`
       }
     ]
@@ -949,10 +949,10 @@ export const API_SYSTEMS = [
       {
         name: "ServerSignal",
         signature: "game.ServerSignal(signalName)",
-        params: [{ name: "signalName", type: "string", desc: "Signal name identifier." }],
+        params: [{ name: "signalName", type: "string", desc: "Exact signal name identifier that must be manually created to match in the Genshin Server Node Graph." }],
         returns: "ServerSignal",
-        desc: "Creates a new Server Signal instance to send data payloads to Node Graphs.",
-        example: "local signal = game.ServerSignal(\"STAGE_CLEAR\")\nsignal:AddInt(100)\nsignal:SendSignal()"
+        desc: "Creates a new Server Signal instance to dispatch events/payloads to the Server Node Graph. NOTE: Signals are NOT auto-created on the server—you must manually create a Signal with the exact matching signalName in the Genshin Node Graph (e.g. to trigger 'Set UI Control (Group) Status -> UI Control Group Status_Off' when exiting a root UI experience).",
+        example: "local exitSignal = game.ServerSignal(\"NORTH_RACER_EXIT\")\nexitSignal:SendSignal()\nroot.showCursor = false"
       },
       {
         name: "SetControllerFocus",
@@ -1200,6 +1200,7 @@ export const API_SYSTEMS = [
     badge: "Class",
     description: "Data transport object used to construct structured parameter payloads and dispatch signals to Server Node Graphs.",
     file: "library/ServerSignal.d.lua",
+    notes: "Signals are NOT auto-created by Lua: you must know the exact signalName string and manually recreate that Signal in the Genshin Server Node Graph. This is the required way to close a root UI experience (wiring the signal receiver to 'Set UI Control (Group) Status -> UI Control Group Status_Off'), because calling root:SetActive(false) or root:SetVisible(false) from Lua prevents the Node Graph from ever making the UI Group visible again.",
     methods: [
       { name: "AddBool", signature: "signal:AddBool(value)", params: [{ name: "value", type: "boolean", desc: "Boolean value." }], returns: "void", desc: "Appends a boolean.", example: "signal:AddBool(true)" },
       { name: "AddBoolList", signature: "signal:AddBoolList(values)", params: [{ name: "values", type: "boolean[]", desc: "Array of booleans." }], returns: "void", desc: "Appends a list of booleans.", example: "signal:AddBoolList({ true, false, true })" },
